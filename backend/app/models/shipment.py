@@ -1,0 +1,58 @@
+from enum import Enum
+from datetime import datetime, timezone
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum as SQLEnum
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+
+class ShipmentStatus(str, Enum):
+    POSTED = "POSTED"
+    MATCHED = "MATCHED"
+    POOLED = "POOLED"
+    IN_TRANSIT = "IN_TRANSIT"
+    DELIVERED = "DELIVERED"
+    CANCELLED = "CANCELLED"
+
+
+class Shipment(Base):
+    __tablename__ = "shipments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    shipper_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    pool_id = Column(Integer, ForeignKey("pools.id"), nullable=True)
+
+    title = Column(String, nullable=False)
+    goods_type = Column(String, nullable=False)  # e.g., "textiles", "hardware", "perishable"
+    
+    # Dimensions & weight
+    weight_kg = Column(Float, nullable=False)
+    volume_cbm = Column(Float, nullable=True)
+    length_cm = Column(Float, default=100.0)
+    width_cm = Column(Float, default=100.0)
+    height_cm = Column(Float, default=100.0)
+
+    # Constraints / Compatibility rules
+    is_perishable = Column(Boolean, default=False)
+    is_hazardous = Column(Boolean, default=False)
+    is_fragile = Column(Boolean, default=False)
+
+    # Locations
+    origin_address = Column(String, nullable=False)
+    origin_lat = Column(Float, nullable=False)
+    origin_lng = Column(Float, nullable=False)
+
+    destination_address = Column(String, nullable=False)
+    dest_lat = Column(Float, nullable=False)
+    dest_lng = Column(Float, nullable=False)
+
+    # Timing
+    delivery_window_start = Column(DateTime, nullable=True)
+    delivery_window_end = Column(DateTime, nullable=True)
+
+    status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.POSTED, nullable=False)
+    allocated_cost = Column(Float, nullable=True)  # Allocated share from pool
+    
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    shipper = relationship("User", backref="shipments")
+    pool = relationship("Pool", back_populates="shipments")
