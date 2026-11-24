@@ -83,10 +83,10 @@ class RouteMatchingService:
         Query OSRM (Open Source Routing Machine) public or self-hosted API.
         coordinates: list of (longitude, latitude) pairs.
         """
+        coord_str = ";".join([f"{lon},{lat}" for lon, lat in coordinates])
         try:
             import httpx
             from app.core.config import settings
-            coord_str = ";".join([f"{lon},{lat}" for lon, lat in coordinates])
             url = f"{settings.OSRM_BASE_URL}/route/v1/driving/{coord_str}?overview=full&geometries=geojson"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 res = await client.get(url)
@@ -99,6 +99,26 @@ class RouteMatchingService:
                             "duration_minutes": round(route["duration"] / 60.0, 1),
                             "geometry": route["geometry"],
                         }
+        except ImportError:
+            # Fallback to standard library urllib if httpx is not installed in the active environment
+            try:
+                import json
+                import urllib.request
+                from app.core.config import settings
+                url = f"{settings.OSRM_BASE_URL}/route/v1/driving/{coord_str}?overview=full&geometries=geojson"
+                req = urllib.request.Request(url, headers={"User-Agent": "PoolShip/1.0"})
+                with urllib.request.urlopen(req, timeout=5.0) as resp:
+                    if resp.status == 200:
+                        data = json.loads(resp.read().decode())
+                        if data.get("code") == "Ok" and data.get("routes"):
+                            route = data["routes"][0]
+                            return {
+                                "distance_km": round(route["distance"] / 1000.0, 2),
+                                "duration_minutes": round(route["duration"] / 60.0, 1),
+                                "geometry": route["geometry"],
+                            }
+            except Exception:
+                pass
         except Exception:
             pass
         
