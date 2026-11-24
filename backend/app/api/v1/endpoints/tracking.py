@@ -53,3 +53,4 @@ async def get_pool_tracking_timeline(pool_id: int, db: AsyncSession = Depends(ge
         .order_by(TrackingEvent.timestamp.desc())
     )
     return result.scalars().all()
+

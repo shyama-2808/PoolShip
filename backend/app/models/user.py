@@ -27,3 +27,4 @@ class User(Base):
     rating = Column(Integer, default=5)
     
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+

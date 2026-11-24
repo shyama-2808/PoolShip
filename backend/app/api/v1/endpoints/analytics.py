@@ -33,3 +33,4 @@ async def get_analytics_summary(db: AsyncSession = Depends(get_db)):
             "equivalent_trees_planted": round(co2_saved / 21.77, 1),  # ~21.77 kg CO2 absorbed per tree/year
         }
     }
+

@@ -68,3 +68,4 @@ async def get_shipment(shipment_id: int, db: AsyncSession = Depends(get_db)):
     if not shipment:
         raise HTTPException(status_code=404, detail="Shipment not found")
     return shipment
+

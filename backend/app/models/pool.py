@@ -41,3 +41,4 @@ class Pool(Base):
     truck = relationship("Truck", back_populates="pools")
     shipments = relationship("Shipment", back_populates="pool")
     tracking_events = relationship("TrackingEvent", back_populates="pool")
+

@@ -9,3 +9,4 @@ api_router.include_router(trucks.router, prefix="/trucks", tags=["Trucks"])
 api_router.include_router(pools.router, prefix="/pools", tags=["Pools & Consolidation"])
 api_router.include_router(tracking.router, prefix="/tracking", tags=["Live Tracking"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics & Carbon"])
+

@@ -57,3 +57,4 @@ class CarbonCalculator:
             "co2_saved_kg": round(co2_saved_kg, 1),
             "co2_reduction_percentage": round(reduction_pct, 1),
         }
+

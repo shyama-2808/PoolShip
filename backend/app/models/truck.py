@@ -37,3 +37,4 @@ class Truck(Base):
 
     transporter = relationship("User", backref="trucks")
     pools = relationship("Pool", back_populates="truck")
+

@@ -25,3 +25,4 @@ class TrackingEventResponse(TrackingEventBase):
 
     class Config:
         from_attributes = True
+

@@ -55,3 +55,4 @@ class PoolOptimizationResult(BaseModel):
     total_diesel_saved_litres: float
     packed_shipments: List[OptimizationItem]
     unpacked_shipments: List[OptimizationItem]
+

@@ -36,3 +36,4 @@ class TruckResponse(TruckBase):
 
     class Config:
         from_attributes = True
+

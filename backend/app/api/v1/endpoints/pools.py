@@ -165,3 +165,4 @@ async def get_pool(pool_id: int, db: AsyncSession = Depends(get_db)):
     if not pool:
         raise HTTPException(status_code=404, detail="Pool not found")
     return pool
+

@@ -118,3 +118,4 @@ class CapacityOptimizer:
             "packed_items": packed,
             "unpacked_items": unpacked,
         }
+

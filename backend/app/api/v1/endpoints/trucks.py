@@ -63,3 +63,4 @@ async def get_truck(truck_id: int, db: AsyncSession = Depends(get_db)):
     if not truck:
         raise HTTPException(status_code=404, detail="Truck not found")
     return truck
+

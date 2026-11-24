@@ -43,3 +43,4 @@ class ShipmentResponse(ShipmentBase):
 
     class Config:
         from_attributes = True
+

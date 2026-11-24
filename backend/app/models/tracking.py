@@ -23,3 +23,4 @@ class TrackingEvent(Base):
     timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     pool = relationship("Pool", back_populates="tracking_events")
+

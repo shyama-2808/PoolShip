@@ -48,3 +48,4 @@ async def login(credentials: UserLogin, db: AsyncSession = Depends(get_db)):
         "role": user.role.value,
         "user_id": user.id,
     }
+

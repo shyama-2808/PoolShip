@@ -56,3 +56,4 @@ class Shipment(Base):
 
     shipper = relationship("User", backref="shipments")
     pool = relationship("Pool", back_populates="shipments")
+
