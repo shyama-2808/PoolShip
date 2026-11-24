@@ -5,7 +5,7 @@ These endpoints run the logistics engine directly on the data you send.
 They do not read or write the database, so they work as soon as the API is up.
 Units: weight kg, volume m³ (cbm), dimensions cm, distance km, money ₹.
 """
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Literal, Optional
 from pydantic import BaseModel, Field, model_validator
 
@@ -335,6 +335,8 @@ class PoolShipment(EngineShipmentWithRoute):
     destination_address: Optional[str] = None
     delivery_window_start: Optional[datetime] = Field(default=None, description="Earliest delivery time. Leave out for 'any time'.")
     delivery_window_end: Optional[datetime] = Field(default=None, description="Latest delivery time. Leave out for 'any time'.")
+    recurring_id: Optional[int] = Field(
+        default=None, description="Set on repeats of a recurring shipment; two repeats of the same one never share a pool")
 
 
 class FindPoolsRequest(BaseModel):
@@ -645,3 +647,184 @@ class PlanPoolResponse(BaseModel):
     stop_plan: Optional[OptimizeStopsResponse] = Field(
         default=None, description="Best order to visit the packed shipments' pickups and drops (offline estimate)"
     )
+
+
+# ---- Task 11: recurring shipments -------------------------------------------------
+Repeat = Literal["daily", "weekly"]
+Weekday = Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
+_HHMM = r"^([01][0-9]|2[0-3]):[0-5][0-9]$"
+
+
+class RecurringShipmentIn(EngineShipmentWithRoute):
+    id: int = Field(ge=1, description="Recurring shipment number; its repeats get ids id x 1000 + 1, + 2, ...")
+    title: Optional[str] = None
+    origin_address: Optional[str] = None
+    destination_address: Optional[str] = None
+    repeat: Repeat = Field(default="weekly", description="daily or weekly")
+    weekdays: Optional[List[Weekday]] = Field(
+        default=None, description="Weekly only: which days, e.g. [\"wed\", \"sat\"]. Leave out = the weekday of start_date.")
+    start_date: date = Field(description="First day it may repeat")
+    end_date: Optional[date] = Field(default=None, description="Last day it may repeat. Leave out = no end.")
+    window_start_time: str = Field(default="09:00", pattern=_HHMM, description="Delivery window opens (IST) on the day itself")
+    window_end_time: str = Field(default="18:00", pattern=_HHMM, description="Delivery window closes (IST)")
+    window_days: int = Field(default=1, ge=0, le=14,
+                             description="Days after the repeat date that the window closes (1 = next day)")
+
+    @model_validator(mode="after")
+    def _check(self):
+        if self.end_date and self.end_date < self.start_date:
+            raise ValueError("end_date is before start_date")
+        if self.window_days == 0 and self.window_end_time <= self.window_start_time:
+            raise ValueError("window_end_time must be after window_start_time on the same day (or set window_days)")
+        return self
+
+
+class _Period(BaseModel):
+    from_date: date = Field(description="First day to create repeats for")
+    to_date: date = Field(description="Last day (included)")
+
+    @model_validator(mode="after")
+    def _check_period(self):
+        if self.to_date < self.from_date:
+            raise ValueError("to_date is before from_date")
+        if (self.to_date - self.from_date).days > 92:
+            raise ValueError("Ask for at most 93 days at a time")
+        return self
+
+
+class RecurringExpandRequest(_Period):
+    recurring: List[RecurringShipmentIn] = Field(min_length=1)
+
+
+class RecurringOccurrence(PoolShipment):
+    recurring_id: int
+    occurrence: int = Field(description="1 = first repeat since start_date")
+    occurrence_date: date
+    title: Optional[str] = None
+
+
+class RecurringExpandResponse(BaseModel):
+    from_date: date
+    to_date: date
+    occurrences: List[RecurringOccurrence] = Field(description="One shipment per repeat date, in date order")
+
+
+class RecurringPoolsRequest(_Period):
+    recurring: List[RecurringShipmentIn] = Field(min_length=1)
+    shipments: List[PoolShipment] = Field(default=[], description="Other open (one-off) shipments, ids below 1000")
+    corridor_tolerance_km: float = Field(default=40.0, gt=0)
+
+
+class RecurringDate(BaseModel):
+    date: date
+    weekday: str
+    shipment_id: int
+    pool_id: Optional[int] = Field(description="Candidate pool it went into, or null")
+    pooled_with: List[int]
+    reason: Optional[str] = Field(description="Why it got no pool")
+
+
+class RecurringSummary(BaseModel):
+    recurring_id: int
+    title: Optional[str] = None
+    repeat: Repeat
+    repeats: str = Field(description="In words, e.g. 'every Wed and Sat'")
+    route: str
+    occurrences: int
+    pooled: int
+    not_pooled: int
+    dates: List[RecurringDate]
+
+
+class RecurringPoolsResponse(FindPoolsResponse):
+    from_date: date
+    to_date: date
+    occurrences_created: int
+    recurring: List[RecurringSummary]
+
+
+# ---- Task 12: hub support (two-leg journeys) -----------------------------------------
+class Hub(BaseModel):
+    id: int
+    name: Optional[str] = None
+    city: Optional[str] = None
+    lat: float
+    lng: float
+    transfer_hours: float = Field(default=3.0, ge=0, description="Unload, sort and reload time at the hub")
+    handling_rate_per_kg: float = Field(default=1.0, ge=0, description="Hub charge, Rs per kg")
+
+
+class HubTruck(TimedTruck):
+    used_weight_kg: float = Field(default=0.0, ge=0, description="Already loaded, so only the rest is spare")
+    used_volume_cbm: float = Field(default=0.0, ge=0)
+
+
+class HubRouteRequest(BaseModel):
+    shipment: PoolShipment
+    trucks: List[HubTruck] = Field(min_length=1)
+    hubs: Optional[List[Hub]] = Field(default=None, description="Leave out to use the sample hubs (GET /engine/hubs)")
+    corridor_tolerance_km: float = Field(default=40.0, gt=0)
+    max_detour_pct: float = Field(default=30.0, gt=0,
+                                  description="Skip hubs that make the trip more than this % longer than direct")
+
+
+class DirectTruck(BaseModel):
+    truck_id: int
+    delivered_at: Optional[datetime] = None
+    on_time: bool
+    cost: float
+
+
+class HubPoint(BaseModel):
+    id: int
+    name: str
+    lat: float
+    lng: float
+
+
+class HubLeg(BaseModel):
+    leg: int
+    truck_id: int
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    km: float
+    departs_at: Optional[datetime] = None
+    arrives_at: Optional[datetime] = None
+    cost: float = Field(description="Leg km x truck Rs/km x share of the truck used")
+
+
+class HubOption(BaseModel):
+    hub: HubPoint
+    legs: List[HubLeg]
+    transfer_hours: float
+    ready_at_hub: Optional[datetime] = Field(description="Leg 1 arrives + transfer time")
+    wait_at_hub_hours: Optional[float] = Field(description="Hours from arriving at the hub to leaving on leg 2")
+    total_km: float
+    extra_km: float = Field(description="Km more than going direct")
+    extra_pct: float
+    delivered_at: Optional[datetime] = None
+    spare_hours: Optional[float] = Field(description="Hours before the delivery window closes")
+    handling_fee: float
+    total_cost: float
+
+
+class HubReject(BaseModel):
+    hub_id: int
+    name: str
+    reason: str
+
+
+class HubRouteResponse(BaseModel):
+    shipment_id: int
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    direct_km: float
+    deadline: Optional[datetime] = None
+    corridor_tolerance_km: float
+    max_detour_pct: float
+    mode: Literal["direct", "hub", "none"] = Field(description="direct = one truck does it; hub = change trucks; none = no way")
+    summary: str
+    direct_trucks: List[DirectTruck] = Field(description="Trucks covering the whole trip (on time or not)")
+    best: Optional[HubOption] = None
+    options: List[HubOption] = Field(description="Best on-time option per working hub, best first")
+    rejected_hubs: List[HubReject]

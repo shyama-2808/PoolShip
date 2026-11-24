@@ -21,10 +21,12 @@ def example(path):
 
 
 class TestEngineApi(unittest.TestCase):
-    def test_sample_data_has_25_shipments_and_5_trucks(self):
+    def test_sample_data_has_25_shipments_and_7_trucks(self):
         data = client.get(f"{API}/sample-data").json()
         self.assertEqual(len(data["shipments"]), 25)  # 21 to 25 are return loads (Task 8)
-        self.assertEqual(len(data["trucks"]), 5)
+        self.assertEqual(len(data["trucks"]), 7)      # 6 and 7 are hub legs to Kolkata (Task 12)
+        self.assertEqual(len(data["hubs"]), 5)
+        self.assertEqual(len(data["recurring_shipments"]), 4)
 
     def test_every_post_endpoint_accepts_its_example(self):
         for path in ["/compatibility", "/optimize-load", "/cost-split", "/carbon", "/carbon/compare", "/route/distance",

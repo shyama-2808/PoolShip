@@ -82,6 +82,12 @@ def main():
             + (f" (capped {r['capped']})" if r["capped"] else "")),
         "/engine/eta": lambda r: (
             f"ETA {r['eta']}, flag {r['delay_flag']}, likely late {r['late_shipments']}"),
+        "/engine/recurring/expand": lambda r: (
+            f"{len(r['occurrences'])} repeat shipments: {[o['id'] for o in r['occurrences']]}"),
+        "/engine/recurring/pools": lambda r: "; ".join(
+            f"recurring {x['recurring_id']} ({x['repeats']}): {x['pooled']} of {x['occurrences']} pooled"
+            for x in r["recurring"]),
+        "/engine/hub-route": lambda r: r["summary"],
         "/engine/plan-pool": lambda r: (
             f"packed {[i['id'] for i in r['load']['packed_items']]}, trip Rs {r['total_trip_cost']}, "
             f"CO2 saved {r['carbon']['co2_saved_kg']} kg"),
@@ -125,6 +131,14 @@ def main():
     s, r = call("GET", f"{api}/engine/demo-eta")
     report("GET /engine/demo-eta (every sample pool)", s, r,
            lambda r: "; ".join(f"truck {p['truck_id']} ETA {p['eta'][:16]} {p['delay_flag']}" for p in r))
+
+    # 4. Phase 4 one-click demos
+    s, r = call("GET", f"{api}/engine/demo-recurring")
+    report("GET /engine/demo-recurring (repeats for 1 to 7 Dec enter pools)", s, r,
+           lambda r: "; ".join(f"recurring {x['recurring_id']}: {x['pooled']} of {x['occurrences']} pooled"
+                               for x in r["recurring"]))
+    s, r = call("GET", f"{api}/engine/demo-hub/20")
+    report("GET /engine/demo-hub/20 (Bengaluru to Kolkata, no direct truck)", s, r, lambda r: r["summary"])
 
     print(f"\n{'All engine endpoints work.' if failures == 0 else f'{failures} call(s) failed.'}")
     sys.exit(1 if failures else 0)

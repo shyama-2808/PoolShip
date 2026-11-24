@@ -6,10 +6,10 @@ Nothing is read from or saved to the database, so you can try them in
 Swagger (/api/v1/docs) as soon as the backend is running.
 Each endpoint comes with a ready-made example built from data/sample_data.json.
 """
-from datetime import timedelta
+from datetime import date, timedelta
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Body, HTTPException
+from fastapi import APIRouter, Body, HTTPException, Query
 
 from app.core.sample_data import load_sample_data
 from app.schemas.engine import (
@@ -23,15 +23,19 @@ from app.schemas.engine import (
     EtaRequest, EtaResponse,
     EngineShipment, EngineTruck,
     FindPoolsRequest, FindPoolsResponse,
+    HubRouteRequest, HubRouteResponse,
     OptimizeLoadRequest, OptimizeLoadResponse,
     OptimizeStopsRequest, OptimizeStopsResponse,
     PlanPoolRequest, PlanPoolResponse,
     PriceRequest, PriceResponse, PriceScenariosResponse,
+    RecurringExpandRequest, RecurringExpandResponse, RecurringPoolsRequest, RecurringPoolsResponse,
     ReturnTripRequest, ReturnTripResponse,
     RoadRouteRequest, RoadRouteResponse,
     RouteMatchRequest, RouteMatchResponse,
 )
-from app.services import compatibility_rules, delay_predictor, dynamic_pricing, return_trip, route_optimizer
+from app.services import (
+    compatibility_rules, delay_predictor, dynamic_pricing, hub_routing, recurring, return_trip, route_optimizer,
+)
 from app.services.capacity_optimizer import CapacityOptimizer, ShipmentItem, TruckSpec
 from app.services.carbon_calculator import CarbonCalculator
 from app.services.cost_splitter import CostSplitter, to_paise
@@ -141,7 +145,7 @@ def _ex(summary: str, value: Any) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
-@router.get("/sample-data", summary="Get the shared sample data (20 shipments, 5 trucks)")
+@router.get("/sample-data", summary="Get the shared sample data (25 shipments, 7 trucks, hubs, recurring shipments)")
 def get_sample_data():
     return load_sample_data()
 
@@ -586,3 +590,118 @@ def _plan(payload: PlanPoolRequest) -> Dict[str, Any]:
         "truck_id": truck.id, "truck_route_km": trip_km, "total_trip_cost": total_cost,
         "route": route, "load": load, "cost_split": split, "carbon": co2, "stop_plan": stop_plan,
     }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4, Task 11: recurring shipments
+# ---------------------------------------------------------------------------
+_REC_EX = [{k: v for k, v in r.items() if k != "shipper_key"} for r in _DATA.get("recurring_shipments", [])]
+_WEEK = {"from_date": "2026-12-01", "to_date": "2026-12-07"}
+
+
+def _recurring_plan(recs: List[Dict[str, Any]], shipments: List[Dict[str, Any]], from_date, to_date,
+                    tol: float) -> Dict[str, Any]:
+    try:
+        return recurring.plan_period(recs, shipments, from_date, to_date, tol)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/recurring/expand", response_model=RecurringExpandResponse,
+             summary="Turn recurring shipments into one shipment per repeat date")
+def recurring_expand(
+    payload: RecurringExpandRequest = Body(openapi_examples=_ex(
+        "The 4 sample recurring shipments over the week 1 to 7 Dec 2026",
+        {"recurring": _REC_EX, **_WEEK},
+    )),
+):
+    """
+    Lists every date from `from_date` to `to_date` that each recurring shipment repeats on
+    (daily, or weekly on its `weekdays`), and makes a shipment for each date with its own
+    delivery window (IST). Copy ids are recurring id x 1000 + occurrence number.
+    """
+    recs = [r.model_dump() for r in payload.recurring]
+    return {"from_date": payload.from_date, "to_date": payload.to_date,
+            "occurrences": recurring.expand(recs, payload.from_date, payload.to_date)}
+
+
+@router.post("/recurring/pools", response_model=RecurringPoolsResponse,
+             summary="Repeats of recurring shipments enter pools automatically, with the one-off shipments")
+def recurring_pools(
+    payload: RecurringPoolsRequest = Body(openapi_examples=_ex(
+        "Sample recurring shipments + all 25 one-off shipments, week of 1 Dec 2026",
+        {"recurring": _REC_EX, "shipments": _ALL_POOL_EX, **_WEEK, "corridor_tolerance_km": 40},
+    )),
+):
+    """
+    Each repeat in the period becomes a shipment and goes through the normal pool finder
+    (POST /engine/route/pools) together with `shipments`. Two repeats of the same recurring
+    shipment never share a pool. `recurring` says, for every repeat date, which pool it
+    joined and with whom, or why it got none.
+    """
+    return _recurring_plan([r.model_dump() for r in payload.recurring],
+                           [s.model_dump() for s in payload.shipments],
+                           payload.from_date, payload.to_date, payload.corridor_tolerance_km)
+
+
+@router.get("/demo-recurring", response_model=RecurringPoolsResponse,
+            summary="One-click demo: the sample recurring shipments entering pools for a week")
+def demo_recurring(from_date: date = Query(date(2026, 12, 1)), to_date: date = Query(date(2026, 12, 7))):
+    if to_date < from_date or (to_date - from_date).days > 92:
+        raise HTTPException(status_code=400, detail="to_date must be 0 to 92 days after from_date")
+    data = load_sample_data()
+    return _recurring_plan(data["recurring_shipments"], data["shipments"], from_date, to_date, 40.0)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4, Task 12: hub support (two-leg journeys)
+# ---------------------------------------------------------------------------
+_HUB_TRUCK_FIELDS = _RETURN_TRUCK_FIELDS | {"used_weight_kg", "used_volume_cbm"}
+
+
+@router.get("/hubs", summary="The sample hubs where goods can change trucks")
+def get_hubs():
+    return load_sample_data()["hubs"]
+
+
+@router.post("/hub-route", response_model=HubRouteResponse, response_model_by_alias=True,
+             summary="No direct truck? Plan a two-leg journey through a hub")
+def hub_route(
+    payload: HubRouteRequest = Body(openapi_examples=_ex(
+        "Jute bags Bengaluru to Kolkata (shipment 20): no truck goes all the way",
+        {"shipment": next(s for s in _ALL_POOL_EX if s["id"] == 20),
+         "trucks": [{k: v for k, v in t.items() if k in _HUB_TRUCK_FIELDS} for t in _DATA["trucks"]],
+         "corridor_tolerance_km": 40, "max_detour_pct": 30},
+    )),
+):
+    """
+    1. If one truck covers the whole trip, fits it and is on time, the answer is `direct`.
+    2. Otherwise every hub is tried: pickup to hub on one truck, hub to drop on another.
+       A hub is skipped if it makes the trip more than `max_detour_pct` longer, if no truck
+       with room covers a leg, or if the goods would arrive after the delivery window.
+    3. `best` is the on-time option that delivers earliest. Times use 45 km/h from each
+       truck's available_date, plus the hub's transfer time. Cost = each leg's km x the
+       truck's Rs/km x the share of the truck used, plus the hub's Rs/kg handling.
+    """
+    hubs = [h.model_dump() for h in payload.hubs] if payload.hubs else load_sample_data()["hubs"]
+    return hub_routing.plan_route(payload.shipment.model_dump(), [t.model_dump() for t in payload.trucks],
+                                  hubs, payload.corridor_tolerance_km, payload.max_detour_pct)
+
+
+@router.get("/demo-hub/{shipment_id}", response_model=HubRouteResponse, response_model_by_alias=True,
+            summary="One-click demo: direct truck or hub journey for a sample shipment (try 20)")
+def demo_hub(shipment_id: int):
+    """
+    Uses the sample trucks and hubs. Each truck's spare room counts what its own
+    demo pool (GET /engine/demo/{truck_id}) already loads, except this shipment.
+    """
+    data = load_sample_data()
+    shipment = next((s for s in data["shipments"] if s["id"] == shipment_id), None)
+    if not shipment:
+        raise HTTPException(status_code=404, detail=f"No sample shipment {shipment_id}")
+    trucks = []
+    for t in data["trucks"]:
+        packed = [p for p in demo(t["id"])["load"]["packed_items"] if p["id"] != shipment_id]
+        trucks.append({**t, "used_weight_kg": sum(p["weight_kg"] for p in packed),
+                       "used_volume_cbm": sum(p["volume_cbm"] for p in packed)})
+    return hub_routing.plan_route(shipment, trucks, data["hubs"])

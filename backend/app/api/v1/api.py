@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.v1.endpoints import auth, shipments, trucks, pools, tracking, analytics, engine
+from app.api.v1.endpoints import auth, shipments, trucks, pools, tracking, analytics, engine, recurring
 
 api_router = APIRouter()
 
@@ -10,3 +10,4 @@ api_router.include_router(pools.router, prefix="/pools", tags=["Pools & Consolid
 api_router.include_router(tracking.router, prefix="/tracking", tags=["Live Tracking"])
 api_router.include_router(analytics.router, prefix="/analytics", tags=["Analytics & Carbon"])
 api_router.include_router(engine.router, prefix="/engine", tags=["Logistics Engine"])
+api_router.include_router(recurring.router, prefix="/recurring", tags=["Recurring Shipments"])

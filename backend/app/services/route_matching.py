@@ -374,6 +374,8 @@ class RouteMatchingService:
                     continue
                 if compatibility_rules.first_block([m for m, _ in members], other):
                     continue
+                if cls._same_series(members, other):
+                    continue
                 window = shared
                 assigned.add(other["id"])
                 members.append((other, fit))
@@ -430,6 +432,12 @@ class RouteMatchingService:
             "unmatched": sorted(unmatched, key=lambda u: u["shipment_id"]),
         }
 
+    @staticmethod
+    def _same_series(members: List[Tuple[Dict[str, Any], Dict[str, Any]]], other: Dict[str, Any]) -> bool:
+        """Two repeats of the same recurring shipment (Task 11) are separate loads, so never one pool."""
+        rid = other.get("recurring_id")
+        return rid is not None and any(m.get("recurring_id") == rid for m, _ in members)
+
     @classmethod
     def _why_alone(
         cls,
@@ -450,12 +458,20 @@ class RouteMatchingService:
             on_mine = cls.route_fit(other, (shipment["origin_lat"], shipment["origin_lng"]),
                                     (shipment["dest_lat"], shipment["dest_lng"]), tol)["fits"]
             if on_other or on_mine:
+                if shipment.get("recurring_id") is not None and other.get("recurring_id") == shipment["recurring_id"]:
+                    continue  # another repeat of the same booking doesn't count as a partner
                 if cls._overlap(cls._window(shipment), cls._window(other)) is None:
                     same_route_other_time.append(other["id"])
                     continue
                 clash = compatibility_rules.first_block(pool_of.get(other["id"], [other]), shipment)
                 if clash:
                     return f"shares a route with shipment {other['id']}, but can't join its pool. {clash}"
+                rid = shipment.get("recurring_id")
+                twin = next((m for m in pool_of.get(other["id"], []) if rid is not None
+                             and m.get("recurring_id") == rid), None)
+                if twin is not None:
+                    return (f"shares a route with shipment {other['id']}, but that pool already carries "
+                            f"another repeat of the same booking (shipment {twin['id']})")
                 return (f"shares a route with shipment {other['id']}, but that shipment "
                         "was already placed in a pool whose delivery window doesn't fit")
         if same_route_other_time:

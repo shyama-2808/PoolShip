@@ -20,6 +20,9 @@ async def lifespan(_: FastAPI):
             await conn.execute(text(
                 "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS temperature_class VARCHAR DEFAULT 'ambient'"
             ))
+            await conn.execute(text(
+                "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS recurring_id INTEGER REFERENCES recurring_shipments(id)"
+            ))
     yield
 
 

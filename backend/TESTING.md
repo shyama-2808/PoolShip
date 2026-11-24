@@ -31,7 +31,7 @@ cd backend
 python scripts/load_sample_data.py
 ```
 
-It should end with `Done. Users: 5, trucks: 5, new shipments: 25.` Running it again is safe, because anything already there is skipped. If you loaded the older 20-shipment file before, it adds only the 5 new return-trip shipments (21 to 25) and says `new shipments: 5`.
+It should end with `Done. Users: 5, trucks: 7, new shipments: 25, new recurring: 4.` Running it again is safe, because anything already there is skipped. If you loaded an older sample file before, it adds only what is new (for example the 2 hub trucks and the 4 recurring shipments from Phase 4).
 
 ### How to send a request in Postman
 
@@ -493,7 +493,7 @@ The other sample logins are `foods@example.com`, `hardware@example.com`, `south@
 
 | Request | What you should see |
 |---|---|
-| `GET http://localhost:8000/api/v1/trucks/` | All 5 trucks |
+| `GET http://localhost:8000/api/v1/trucks/` | All 7 trucks (6 and 7 are the Kolkata trucks used for hub journeys in D3) |
 | `GET http://localhost:8000/api/v1/trucks/?origin=Bengaluru` | Only the Bengaluru trucks (1 and 4) |
 | `GET http://localhost:8000/api/v1/trucks/2` | Eicher 14 ft, Mumbai → Pune, 4,000 kg, ₹32/km |
 | `GET http://localhost:8000/api/v1/trucks/999` | **404** *"Truck not found"* |
@@ -886,6 +886,268 @@ How it works: **ETA = departure + driving with traffic + time at stops + rest br
 
 ---
 
+## Part D: Phase 4 extras (Tasks 11 and 12)
+
+D1 and D3 use the engine only (no database). D2 uses the database, after Part B.
+
+What's new in the sample data (`GET http://localhost:8000/api/v1/engine/sample-data`):
+
+- **trucks 6 and 7** (Hyderabad → Kolkata, Chennai → Kolkata). They only matter for hub journeys (D3).
+- **hubs**: Hyderabad, Chennai, Vijayawada, Nagpur and Pune, places where goods can change trucks.
+- **recurring_shipments**: 4 repeat bookings.
+
+| Recurring | What | Repeats | Route |
+|---|---|---|---|
+| 1 | Cotton bales, 400 kg | every Wed and Sat | Bengaluru → Chennai |
+| 2 | Pipe fittings, 250 kg | every day | Hosur → Chennai |
+| 3 | Packaged snacks, 300 kg | every Tue | Navi Mumbai → Pune |
+| 4 | Door locks, 200 kg | every Mon | Delhi → Lucknow (nobody else goes there) |
+
+### D1. Recurring shipments in the engine (Task 11)
+
+How it works: a shipper saves a load **once** with how often it repeats: `"repeat": "daily"`, or `"weekly"` with `"weekdays"` such as `["wed", "sat"]`. Every repeat date becomes its own shipment with its own delivery window. With the default `window_start_time` "09:00", `window_end_time` "18:00" and `window_days` 1, a repeat on 2 Dec must be delivered between 2 Dec 09:00 and 3 Dec 18:00 (India time). Each copy gets the id **recurring id × 1000 + repeat number**, so 2003 is the 3rd repeat of recurring shipment 2.
+
+The copies then go through the normal pool finder (A11) together with the one-off shipments, so they **enter pools automatically**. One rule is new: two repeats of the **same** booking never share a pool, because each is a separate load for a separate day.
+
+**D1a. List the repeat dates**
+
+**POST** `http://localhost:8000/api/v1/engine/recurring/expand`
+
+```json
+{
+  "recurring": [
+    {"id": 1, "title": "Cotton bales (twice a week)", "goods_type": "textiles", "weight_kg": 400, "volume_cbm": 1.2,
+     "origin_address": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946,
+     "destination_address": "Chennai", "dest_lat": 13.0827, "dest_lng": 80.2707,
+     "repeat": "weekly", "weekdays": ["wed", "sat"], "start_date": "2026-12-01"}
+  ],
+  "from_date": "2026-12-01",
+  "to_date": "2026-12-14"
+}
+```
+
+**What you should see:** 4 entries in `occurrences`:
+
+| id | occurrence_date | delivery_window_start | delivery_window_end |
+|---|---|---|---|
+| 1001 | 2026-12-02 (Wed) | 2026-12-02T09:00:00+05:30 | 2026-12-03T18:00:00+05:30 |
+| 1002 | 2026-12-05 (Sat) | 2026-12-05T09:00:00+05:30 | 2026-12-06T18:00:00+05:30 |
+| 1003 | 2026-12-09 (Wed) | 2026-12-09T09:00:00+05:30 | 2026-12-10T18:00:00+05:30 |
+| 1004 | 2026-12-12 (Sat) | 2026-12-12T09:00:00+05:30 | 2026-12-13T18:00:00+05:30 |
+
+**Try also:**
+
+| Change | What you should see |
+|---|---|
+| `"repeat": "daily"` and remove `weekdays` | 14 entries, 1001 to 1014 |
+| remove `weekdays` (still weekly) | repeats on the weekday of `start_date`: 1 Dec is a Tuesday, so 1, 8 Dec |
+| add `"end_date": "2026-12-06"` | only 1001 and 1002 |
+| `"from_date": "2026-12-08"` | 1003 and 1004. The numbers count from `start_date`, so they don't change with the range you ask for |
+| `"window_days": 0, "window_end_time": "08:00"` | **422** (the window would close before it opens) |
+| `"weekdays": ["funday"]`, or `to_date` before `from_date` | **422** |
+
+**D1b. Repeats entering pools, small example**
+
+**POST** `http://localhost:8000/api/v1/engine/recurring/pools`
+
+Recurring 1 and 2 over 4 to 6 Dec, no one-off shipments:
+
+```json
+{
+  "recurring": [
+    {"id": 1, "title": "Cotton bales (twice a week)", "goods_type": "textiles", "weight_kg": 400, "volume_cbm": 1.2,
+     "origin_address": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946,
+     "destination_address": "Chennai", "dest_lat": 13.0827, "dest_lng": 80.2707,
+     "repeat": "weekly", "weekdays": ["wed", "sat"], "start_date": "2026-12-01"},
+    {"id": 2, "title": "Pipe fittings (daily)", "goods_type": "hardware", "weight_kg": 250, "volume_cbm": 0.6,
+     "origin_address": "Hosur", "origin_lat": 12.7409, "origin_lng": 77.8253,
+     "destination_address": "Chennai", "dest_lat": 13.0827, "dest_lng": 80.2707,
+     "repeat": "daily", "start_date": "2026-12-01"}
+  ],
+  "shipments": [],
+  "from_date": "2026-12-04",
+  "to_date": "2026-12-06"
+}
+```
+
+**What you should see:**
+- `occurrences_created` **4**: 1002 (Sat), and 2004, 2005, 2006 (Fri, Sat, Sun)
+- `pools`: one pool, `shipment_ids` **[1002, 2004]**, 650 kg, `shared_delivery_window` 5 Dec 09:00 to 18:00
+- 2005 and 2006 are in `unmatched` with *"shares a route with shipment 1002, but that pool already carries another repeat of the same booking (shipment 2004)"*
+- `recurring`: recurring 1 `"repeats": "every Wed and Sat"`, 1 of 1 pooled; recurring 2 `"every day"`, 1 of 3 pooled. `dates` says for each date which pool it went into (`pool_id`, `pooled_with`) or why not (`reason`).
+
+If you give a one-off shipment an id of 1000 or more that a copy also uses, you get **400**.
+
+**D1c. One-click demo: a whole week with all the sample shipments**
+
+**GET** `http://localhost:8000/api/v1/engine/demo-recurring` (1 to 7 Dec; change it with `?from_date=2026-12-08&to_date=2026-12-14`)
+
+**What you should see:** `occurrences_created` **11**, and in `recurring`:
+
+| Recurring | Repeats in the week | Pooled | What happened |
+|---|---|---|---|
+| 1 cotton bales | 2 (Wed 1001, Sat 1002) | 2 | 1001 joins the Bengaluru → Chennai pool **[1, 2, 3, 5, 6, 1001, 2001]**; 1002 pools with 2004 |
+| 2 pipe fittings | 7 (2001 to 2007) | 3 | 2001 is in the big pool, 2002 pools with 4, 2004 with 1002. The rest are left alone because the pool on their route already has one of their repeats, or the windows don't overlap |
+| 3 snacks | 1 (Tue 3001) | 1 | joins the Mumbai → Pune pool **[7, 8, 9, 10, 3001]** |
+| 4 door locks | 1 (Mon 4001) | 0 | *"no other open shipment travels a similar route"* |
+
+The full `pools` list is `[1, 2, 3, 5, 6, 1001, 2001]`, `[2002, 4]`, `[7, 8, 9, 10, 3001]`, `[11, 12, 13, 14]`, `[15, 16, 17]`, `[18, 19]`, `[21, 22, 23, 24]`, `[1002, 2004]`. Shipment 4, the paint thinner, is no longer alone: it travels with Wednesday's pipe fittings. The same request with the ready-made Swagger example of `POST /engine/recurring/pools` gives the same pools.
+
+---
+
+### D2. Recurring shipments in the database (Task 11)
+
+Do Part B first (load the sample data, B8 pool, and so on). `load_sample_data.py` now also saves the 4 recurring shipments, and it should end with `Done. Users: 5, trucks: 7, new shipments: 25, new recurring: 4.` If you loaded the data before Phase 4, run it again: it adds the 2 new trucks and the 4 recurring shipments and skips the rest.
+
+How it works: a recurring shipment is saved once. **POST /recurring/generate** then posts a normal shipment (status `POSTED`, with `recurring_id`) for every repeat date in a period. It never makes the same date twice, so it is safe to run every day, by hand or from a scheduler. Each new shipment **joins an open pool straight away** if one fits: the pool must already hold shipments, its truck must go the shipment's way and reach the drop before the delivery window closes (45 km/h from the truck's `available_date`), the windows must overlap, the goods must be allowed together, it must still fit, and the pool must not already hold another repeat of the same booking. Everyone's cost share is then worked out again. The answer also groups every open shipment that is still not in a pool, like A11.
+
+**D2a. See the saved recurring shipments**
+
+**GET** `http://localhost:8000/api/v1/recurring/`
+
+**What you should see:** 4 entries. Recurring 1 has `"weekdays": ["wed", "sat"]`, `"repeats": "every Wed and Sat"` and `"active": true`.
+
+**D2b. Make a pool on truck 1 for the repeats to join**
+
+**POST** `http://localhost:8000/api/v1/pools/`
+
+```json
+{"truck_id": 1, "shipment_ids": [1, 3], "split_method": "weight"}
+```
+
+**What you should see:** a new pool (note its `id`; it is **4** if you did every step of B8 including the empty pool and the "different split" pool), `total_cost` **10156.02**, `current_weight_kg` **1100**, `utilization_percentage` **44**. Saree bales pay **5539.65** and mangoes **4616.37**.
+
+**D2c. Post the repeats for one week**
+
+**POST** `http://localhost:8000/api/v1/recurring/generate?from_date=2026-12-01&to_date=2026-12-07`
+
+(No body. Leave out both dates to use today and the next 6 days.)
+
+**What you should see:**
+- `already_there` **0** and 11 entries in `created`, with new shipment ids after your last one. Titles say the day, for example *"Cotton bales (twice a week) (Wed 02 Dec)"*.
+- **Wednesday's cotton bales** (2 Dec) and **Tuesday's pipe fittings** (1 Dec) have `pool_id` = your D2b pool and `reason` *"joined pool 4 on truck 1"*.
+- Every other entry has `pool_id` null and *"no open pool has a truck going this way in time, with room, a matching delivery window and goods it may carry"*. For example Wednesday's pipe fittings can't join because the pool already has Tuesday's.
+- `candidate_pools` groups what is still open. Among them is the Saturday cotton bales with Friday's pipe fittings (like 1002 + 2004 in D1b), and Tuesday's snacks with the Mumbai → Pune cotton bales from B6. The rest of this list depends on which Part B steps you did. (If you skipped B10, your B8 truck 2 pool is still open, so Tuesday's snacks join it straight away instead.)
+
+**D2d. Look at the pool again**
+
+**GET** `http://localhost:8000/api/v1/pools/4` (your D2b pool id)
+
+**What you should see:** 4 shipments, all `POOLED`: saree bales, mangoes, the Wednesday cotton bales and the Tuesday pipe fittings. `current_weight_kg` **1750**, `utilization_percentage` **70**, `total_cost` still **10156.02** (the same truck trip, now shared by four), `co2_saved_kg` **740.94**. The shares are now:
+
+| Shipment | kg | allocated_cost |
+|---|---|---|
+| Cotton saree bales | 600 | 3482.06 |
+| Fresh mangoes | 500 | 2901.72 |
+| Cotton bales (Wed 02 Dec) | 400 | 2321.38 |
+| Pipe fittings (Tue 01 Dec) | 250 | 1450.86 |
+
+They add up to 10156.02, and every earlier shipper now pays less than in D2b.
+
+**D2e. Run it again, then stop a booking**
+
+| Request | What you should see |
+|---|---|
+| **POST** `.../recurring/generate?from_date=2026-12-01&to_date=2026-12-07` again | `created` **[]**, `already_there` **11**: nothing is made twice |
+| **POST** `.../recurring/generate?from_date=2026-12-01&to_date=2026-12-14` | 11 new (8 to 14 Dec only), `already_there` **11** |
+| **POST** `.../recurring/4/stop` | recurring 4 with `"active": false` |
+| **POST** `.../recurring/generate?from_date=2026-12-15&to_date=2026-12-21` | 10 new, none for recurring 4 |
+| **GET** `.../shipments/?status=POSTED` | the new repeats are there with their `recurring_id` |
+| **GET** `.../recurring/99` | **404** *"Recurring shipment not found"* |
+| `to_date` before `from_date` in generate | **400** *"to_date must be 0 to 92 days after from_date"* |
+
+**D2f. Save your own recurring shipment**
+
+**POST** `http://localhost:8000/api/v1/recurring/?shipper_id=1`
+
+```json
+{
+  "title": "Silk sarees (every Monday and Thursday)", "goods_type": "textiles", "weight_kg": 150,
+  "origin_address": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946,
+  "destination_address": "Hyderabad", "dest_lat": 17.385, "dest_lng": 78.4867,
+  "repeat": "weekly", "weekdays": ["mon", "thu"], "start_date": "2026-12-01", "end_date": "2026-12-31"
+}
+```
+
+**What you should see:** the saved booking with its new `id`, `"repeats": "every Mon and Thu"` and `"active": true`. `end_date` before `start_date`, or a weekday like `"funday"`, gives **422**.
+
+---
+
+### D3. Hub support: change trucks at a hub (Task 12)
+
+How it works, for one shipment:
+
+1. **Direct first.** If one truck's route covers the whole trip, the shipment fits, and it gets there before the delivery window closes, no hub is needed (`mode: "direct"`).
+2. **Detour.** For each hub, pickup → hub → drop may be at most `max_detour_pct` (default 30%) longer than going direct. Hubs far off the way are skipped.
+3. **Two trucks.** Leg 1 (pickup → hub) needs a truck whose route covers it, and leg 2 (hub → drop) needs a different one. The shipment must fit each truck's spare room (`used_weight_kg` / `used_volume_cbm` say what is already loaded).
+4. **Timing** at 45 km/h. Truck 1 leaves at its `available_date`, collects the goods and drives to the hub. The goods are ready after the hub's `transfer_hours`. Truck 2 leaves the hub at whichever is later: goods ready, or truck 2 at the hub. Arriving after the delivery window closes means rejected.
+5. **Cost** of each leg = leg km × the truck's ₹/km × the share of the truck used (the higher of weight share and volume share, the same base price as C4). Plus the hub's handling charge (₹ per kg).
+6. **Best** = the on-time option that delivers earliest. Every hub that didn't work is listed with the reason.
+
+**D3a. See the hubs:** **GET** `http://localhost:8000/api/v1/engine/hubs` lists the 5 hubs with `transfer_hours` (3, or 2 for Vijayawada) and `handling_rate_per_kg` (₹1, or ₹0.80 for Vijayawada).
+
+**D3b. Bengaluru → Kolkata has no direct truck**
+
+**POST** `http://localhost:8000/api/v1/engine/hub-route`
+
+Jute bags (shipment 20) and four trucks. `hubs` is left out, so the sample hubs are used:
+
+```json
+{
+  "shipment": {"id": 20, "goods_type": "textiles", "weight_kg": 500, "volume_cbm": 1.5,
+               "origin_address": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946,
+               "destination_address": "Kolkata", "dest_lat": 22.5726, "dest_lng": 88.3639,
+               "delivery_window_end": "2026-12-08T18:00:00+05:30"},
+  "trucks": [
+    {"id": 1, "max_weight_kg": 2500, "max_volume_cbm": 14, "origin_city": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946, "destination_city": "Chennai", "dest_lat": 13.0827, "dest_lng": 80.2707, "available_date": "2026-12-01T06:00:00+05:30", "rate_per_km": 28},
+    {"id": 4, "max_weight_kg": 15000, "max_volume_cbm": 60, "origin_city": "Bengaluru", "origin_lat": 12.9716, "origin_lng": 77.5946, "destination_city": "Hyderabad", "dest_lat": 17.385, "dest_lng": 78.4867, "available_date": "2026-12-02T06:00:00+05:30", "rate_per_km": 55},
+    {"id": 6, "max_weight_kg": 9000, "max_volume_cbm": 40, "origin_city": "Hyderabad", "origin_lat": 17.385, "origin_lng": 78.4867, "destination_city": "Kolkata", "dest_lat": 22.5726, "dest_lng": 88.3639, "available_date": "2026-12-05T06:00:00+05:30", "rate_per_km": 45},
+    {"id": 7, "max_weight_kg": 8000, "max_volume_cbm": 38, "origin_city": "Chennai", "origin_lat": 13.0827, "origin_lng": 80.2707, "destination_city": "Kolkata", "dest_lat": 22.5726, "dest_lng": 88.3639, "available_date": "2026-12-07T06:00:00+05:30", "rate_per_km": 42}
+  ]
+}
+```
+
+**What you should see:**
+- `mode` **"hub"**, `direct_km` **1950.9**, `direct_trucks` **[]**
+- `summary` *"No single truck covers this trip on time. Go through Hyderabad hub: truck 4 to the hub, wait 58.1 h, then truck 6, delivered 2026-12-06T14:50. Total Rs 5339.2."*
+- `best`:
+
+| | Truck | From → to | km | Time | Cost ₹ |
+|---|---|---|---|---|---|
+| Leg 1 | 4 | Bengaluru → Hyderabad hub | 625.0 | arrives 2 Dec 19:53 | 1145.82 |
+| Hub | | ready after 3 h | | 2 Dec 22:53, waits 58.1 h | 500.00 handling (500 kg × ₹1) |
+| Leg 2 | 6 | Hyderabad hub → Kolkata | 1477.4 | leaves 5 Dec 06:00, arrives 6 Dec 14:50 | 3693.38 |
+| Total | | | 2102.3 (151.4 km, 7.8% more than direct) | 51.2 h before the deadline | **5339.20** |
+
+- `rejected_hubs`:
+  - Chennai: *"trucks 1 and 7 would deliver at 2026-12-08T19:44, after the deadline 2026-12-08T18:00"*
+  - Vijayawada and Nagpur: *"no truck with room goes from Bengaluru to ..."*
+  - Pune: *"going through it adds 48% to the trip (limit 30%)"*
+
+**Try also:**
+
+| Change | What you should see |
+|---|---|
+| `"delivery_window_end": "2026-12-06T12:00:00+05:30"` | `mode` **"none"**: Hyderabad now arrives too late (6 Dec 14:50) as well |
+| add `"used_weight_kg": 14800` to truck 4 | `mode` **"none"**: truck 4 has no room, so Hyderabad has no first leg |
+| `"max_detour_pct": 5` | `mode` **"none"**: Hyderabad (8%) and Chennai (6%) are now too far off the way |
+| `"hubs": [{"id": 9, "name": "My hub", "lat": 17.385, "lng": 78.4867, "transfer_hours": 10, "handling_rate_per_kg": 2}]` | your own hub: ready at 3 Dec 05:53, handling ₹1,000, total **₹5,839.20** |
+| leave out `delivery_window_end` | no deadline check; Hyderabad is still best |
+| `"trucks": []` | **422** |
+
+**D3c. One-click demos with the sample trucks**
+
+These count what each truck already carries in its own demo pool (A13), so trucks can be full.
+
+| Request | What you should see |
+|---|---|
+| **GET** `http://localhost:8000/api/v1/engine/demo-hub/20` | the same Hyderabad answer as D3b, ₹5,339.20 |
+| **GET** `.../engine/demo-hub/2` | `mode` **"direct"**: *"No hub needed: truck 1 covers the whole trip and delivers by 2026-12-01T14:26"* |
+| **GET** `.../engine/demo-hub/1` | `mode` **"none"**: *"...truck 1 covers the trip but has only 200 kg spare (shipment is 600 kg)."* |
+| **GET** `.../engine/demo-hub/99` | **404** |
+
+---
+
 ## Quick checklist
 
 - [ ] `/health` says healthy
@@ -904,5 +1166,9 @@ How it works: **ETA = departure + driving with traffic + time at stops + rest br
 - [ ] C3: demo-return/1 carries 21, 22, 23 home (82% full, ₹10,155.60); 24 is rejected as too late
 - [ ] C4: demo-price/2 shows urgent, nearly empty and nearly full all dearer than ₹1,686.83, never above ×1.5
 - [ ] C5: demo-eta gives all five pools an ETA and a flag; `?delay_hours=4` makes truck 2 at_risk for shipment 10
+- [ ] D1: recurring 1 repeats on 2, 5, 9, 12 Dec (ids 1001 to 1004); demo-recurring makes 11 repeats and puts 1001 in the Bengaluru → Chennai pool
+- [ ] D1: two repeats of the same booking never share a pool
+- [ ] D2: generate posts 11 shipments; Wednesday cotton and Tuesday pipe fittings join your truck 1 pool (1,750 kg, 70%); running it again makes nothing new
+- [ ] D3: hub-route sends shipment 20 through Hyderabad on trucks 4 then 6, delivered 6 Dec 14:50, ₹5,339.20; Chennai is rejected as late
 
 If anything doesn't match, run `python scripts/try_engine.py`. It calls every engine path and prints OK or FAIL for each.

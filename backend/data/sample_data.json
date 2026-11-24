@@ -1,5 +1,5 @@
 {
-  "_about": "PoolShip shared sample data. Units: weight kg, volume m3 (cbm), dimensions cm, distance km, money INR (rate_per_km). Shipments 1-6 fit truck 1's corridor, 7-10 truck 2, 11-14 truck 3, 15-17 truck 4, 18-19 truck 5; shipment 20 fits no truck. Shipments 21-25 go the other way: they are return loads for truck 1 (Chennai to Bengaluru: 21-24, but 24 is due too early) and truck 2 (Pune to Mumbai: 25). 'id' is a sample reference number; the database assigns its own ids when loaded.",
+  "_about": "PoolShip shared sample data. Units: weight kg, volume m3 (cbm), dimensions cm, distance km, money INR (rate_per_km). Shipments 1-6 fit truck 1's corridor, 7-10 truck 2, 11-14 truck 3, 15-17 truck 4, 18-19 truck 5; shipment 20 fits no truck. Shipments 21-25 go the other way: they are return loads for truck 1 (Chennai to Bengaluru: 21-24, but 24 is due too early) and truck 2 (Pune to Mumbai: 25). 'id' is a sample reference number; the database assigns its own ids when loaded. Phase 4: trucks 6 (Hyderabad to Kolkata) and 7 (Chennai to Kolkata) only matter for hub journeys: shipment 20 (Bengaluru to Kolkata) has no direct truck, so it rides truck 4 to the Hyderabad hub and changes to truck 6 (via Chennai with trucks 1 and 7 would be late). 'hubs' are transfer points. 'recurring_shipments' are repeat bookings (daily or weekly); each date becomes its own shipment with id = recurring id x 1000 + occurrence number.",
   "default_password": "Poolship@123",
   "users": [
     {
@@ -141,6 +141,44 @@
       "dest_lng": 80.2707,
       "available_date": "2026-12-03T06:00:00+05:30",
       "rate_per_km": 35
+    },
+    {
+      "id": 6,
+      "transporter_key": "transporter_south",
+      "truck_type": "Tata 1109 (19 ft)",
+      "registration_number": "TS09EF4321",
+      "max_weight_kg": 9000,
+      "max_volume_cbm": 40,
+      "length_cm": 580,
+      "width_cm": 230,
+      "height_cm": 230,
+      "origin_city": "Hyderabad",
+      "origin_lat": 17.385,
+      "origin_lng": 78.4867,
+      "destination_city": "Kolkata",
+      "dest_lat": 22.5726,
+      "dest_lng": 88.3639,
+      "available_date": "2026-12-05T06:00:00+05:30",
+      "rate_per_km": 45
+    },
+    {
+      "id": 7,
+      "transporter_key": "transporter_south",
+      "truck_type": "Eicher 19 ft",
+      "registration_number": "TN01GH8765",
+      "max_weight_kg": 8000,
+      "max_volume_cbm": 38,
+      "length_cm": 580,
+      "width_cm": 230,
+      "height_cm": 230,
+      "origin_city": "Chennai",
+      "origin_lat": 13.0827,
+      "origin_lng": 80.2707,
+      "destination_city": "Kolkata",
+      "dest_lat": 22.5726,
+      "dest_lng": 88.3639,
+      "available_date": "2026-12-07T06:00:00+05:30",
+      "rate_per_km": 42
     }
   ],
   "shipments": [
@@ -694,6 +732,170 @@
       "dest_lng": 72.8777,
       "delivery_window_start": "2026-12-01T09:00:00+05:30",
       "delivery_window_end": "2026-12-03T18:00:00+05:30"
+    }
+  ],
+  "hubs": [
+    {
+      "id": 1,
+      "name": "Hyderabad hub",
+      "city": "Hyderabad",
+      "lat": 17.385,
+      "lng": 78.4867,
+      "transfer_hours": 3,
+      "handling_rate_per_kg": 1.0
+    },
+    {
+      "id": 2,
+      "name": "Chennai hub",
+      "city": "Chennai",
+      "lat": 13.0827,
+      "lng": 80.2707,
+      "transfer_hours": 3,
+      "handling_rate_per_kg": 1.0
+    },
+    {
+      "id": 3,
+      "name": "Vijayawada hub",
+      "city": "Vijayawada",
+      "lat": 16.5062,
+      "lng": 80.648,
+      "transfer_hours": 2,
+      "handling_rate_per_kg": 0.8
+    },
+    {
+      "id": 4,
+      "name": "Nagpur hub",
+      "city": "Nagpur",
+      "lat": 21.1458,
+      "lng": 79.0882,
+      "transfer_hours": 3,
+      "handling_rate_per_kg": 1.0
+    },
+    {
+      "id": 5,
+      "name": "Pune hub",
+      "city": "Pune",
+      "lat": 18.5204,
+      "lng": 73.8567,
+      "transfer_hours": 3,
+      "handling_rate_per_kg": 1.0
+    }
+  ],
+  "recurring_shipments": [
+    {
+      "id": 1,
+      "shipper_key": "shipper_textiles",
+      "title": "Cotton bales (twice a week)",
+      "goods_type": "textiles",
+      "weight_kg": 400,
+      "volume_cbm": 1.2,
+      "length_cm": 120,
+      "width_cm": 100,
+      "height_cm": 100,
+      "is_perishable": false,
+      "is_hazardous": false,
+      "is_fragile": false,
+      "origin_address": "Bengaluru",
+      "origin_lat": 12.9716,
+      "origin_lng": 77.5946,
+      "destination_address": "Chennai",
+      "dest_lat": 13.0827,
+      "dest_lng": 80.2707,
+      "repeat": "weekly",
+      "weekdays": [
+        "wed",
+        "sat"
+      ],
+      "start_date": "2026-12-01",
+      "end_date": null,
+      "window_start_time": "09:00",
+      "window_end_time": "18:00",
+      "window_days": 1
+    },
+    {
+      "id": 2,
+      "shipper_key": "shipper_hardware",
+      "title": "Pipe fittings (daily)",
+      "goods_type": "hardware",
+      "weight_kg": 250,
+      "volume_cbm": 0.6,
+      "length_cm": 100,
+      "width_cm": 100,
+      "height_cm": 60,
+      "is_perishable": false,
+      "is_hazardous": false,
+      "is_fragile": false,
+      "origin_address": "Hosur",
+      "origin_lat": 12.7409,
+      "origin_lng": 77.8253,
+      "destination_address": "Chennai",
+      "dest_lat": 13.0827,
+      "dest_lng": 80.2707,
+      "repeat": "daily",
+      "weekdays": null,
+      "start_date": "2026-12-01",
+      "end_date": null,
+      "window_start_time": "09:00",
+      "window_end_time": "18:00",
+      "window_days": 1
+    },
+    {
+      "id": 3,
+      "shipper_key": "shipper_foods",
+      "title": "Packaged snacks (every Tuesday)",
+      "goods_type": "fmcg",
+      "weight_kg": 300,
+      "volume_cbm": 1.0,
+      "length_cm": 100,
+      "width_cm": 100,
+      "height_cm": 100,
+      "is_perishable": false,
+      "is_hazardous": false,
+      "is_fragile": false,
+      "origin_address": "Navi Mumbai",
+      "origin_lat": 19.033,
+      "origin_lng": 73.0297,
+      "destination_address": "Pune",
+      "dest_lat": 18.5204,
+      "dest_lng": 73.8567,
+      "repeat": "weekly",
+      "weekdays": [
+        "tue"
+      ],
+      "start_date": "2026-12-01",
+      "end_date": null,
+      "window_start_time": "09:00",
+      "window_end_time": "18:00",
+      "window_days": 1
+    },
+    {
+      "id": 4,
+      "shipper_key": "shipper_hardware",
+      "title": "Door locks to Lucknow (every Monday)",
+      "goods_type": "hardware",
+      "weight_kg": 200,
+      "volume_cbm": 0.5,
+      "length_cm": 100,
+      "width_cm": 100,
+      "height_cm": 50,
+      "is_perishable": false,
+      "is_hazardous": false,
+      "is_fragile": false,
+      "origin_address": "Delhi",
+      "origin_lat": 28.7041,
+      "origin_lng": 77.1025,
+      "destination_address": "Lucknow",
+      "dest_lat": 26.8467,
+      "dest_lng": 80.9462,
+      "repeat": "weekly",
+      "weekdays": [
+        "mon"
+      ],
+      "start_date": "2026-12-01",
+      "end_date": null,
+      "window_start_time": "09:00",
+      "window_end_time": "18:00",
+      "window_days": 1
     }
   ]
 }

@@ -1,4 +1,4 @@
-from datetime import timezone
+from datetime import timedelta, timezone
 from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -206,28 +206,85 @@ async def create_pool(
             "does_not_fit": [{"id": u["item"].id, "reason": u["reason"]} for u in load["unpacked_items"]],
         })
 
-    pool = Pool(
-        truck_id=truck.id,
-        status=PoolStatus.OPTIMIZED if shipments else PoolStatus.OPEN,
-        split_method=payload.split_method,
-        total_distance_km=round(plan["trip_km"], 2),
-        total_cost=plan["total_cost"],
-        current_weight_kg=load["total_packed_weight_kg"],
-        current_volume_cbm=load["total_packed_volume_cbm"],
-        utilization_percentage=load["overall_utilization_pct"],
-        co2_saved_kg=plan["carbon"]["co2_saved_kg"],
-        diesel_saved_litres=plan["carbon"]["diesel_saved_litres"],
-    )
+    pool = Pool(truck_id=truck.id, split_method=payload.split_method)
     db.add(pool)
     await db.flush()  # gives the pool its id
+    _apply_plan(pool, shipments, plan)
 
+    await db.commit()
+    return await _load_pool(db, pool.id)
+
+
+def _apply_plan(pool: Pool, shipments: List[Shipment], plan: Dict[str, Any]) -> None:
+    """Save a plan's numbers on the pool and every shipment's share."""
+    load = plan["load"]
+    pool.status = PoolStatus.OPTIMIZED if shipments else PoolStatus.OPEN
+    pool.total_distance_km = round(plan["trip_km"], 2)
+    pool.total_cost = plan["total_cost"]
+    pool.current_weight_kg = load["total_packed_weight_kg"]
+    pool.current_volume_cbm = load["total_packed_volume_cbm"]
+    pool.utilization_percentage = load["overall_utilization_pct"]
+    pool.co2_saved_kg = plan["carbon"]["co2_saved_kg"]
+    pool.diesel_saved_litres = plan["carbon"]["diesel_saved_litres"]
     for s in shipments:
         s.pool_id = pool.id
         s.status = ShipmentStatus.POOLED
         s.allocated_cost = plan["cost_by_id"][s.id]
 
-    await db.commit()
-    return await _load_pool(db, pool.id)
+
+def _as_route(x: Any) -> Dict[str, Any]:
+    return {"id": x.id, "origin_lat": x.origin_lat, "origin_lng": x.origin_lng,
+            "dest_lat": x.dest_lat, "dest_lng": x.dest_lng}
+
+
+async def join_open_pool(db: AsyncSession, shipment: Shipment) -> Dict[str, Any]:
+    """
+    Put an open shipment into the first open pool (OPEN or OPTIMIZED, already holding
+    shipments, oldest first) where it:
+      * lies along the pool truck's route (same corridor test as Task 1),
+      * can be delivered in time: the truck, leaving at its available_date, reaches the
+        drop (via the pickup, 45 km/h) before the shipment's delivery window closes,
+      * has a delivery window that overlaps every member's window,
+      * may share the truck with every member (compatibility rules), and
+      * still fits (weight, volume, size).
+    Everyone's cost share is worked out again, since one more shipper now shares the trip.
+    Returns {"pool_id": id or None, "reason": plain words}. The caller commits.
+    """
+    result = await db.execute(
+        select(Pool).options(selectinload(Pool.shipments), selectinload(Pool.truck))
+        .where(Pool.status.in_((PoolStatus.OPEN, PoolStatus.OPTIMIZED))).order_by(Pool.id)
+    )
+    for pool in result.scalars().all():
+        truck = pool.truck
+        if not pool.shipments:
+            continue  # an empty pool has no date yet to match against
+        if not RouteMatchingService.find_matching_shipments(_as_route(truck), [_as_route(shipment)])["matched"]:
+            continue
+        if truck.available_date is not None and shipment.delivery_window_end is not None:
+            km = (_road_km(truck.origin_lat, truck.origin_lng, shipment.origin_lat, shipment.origin_lng)
+                  + _shipment_km(shipment))
+            if truck.available_date + timedelta(hours=km / route_optimizer.AVG_SPEED_KMH) > shipment.delivery_window_end:
+                continue
+        members = sorted(pool.shipments, key=lambda s: s.id) + [shipment]
+        if shipment.recurring_id is not None and any(m.recurring_id == shipment.recurring_id for m in members[:-1]):
+            continue  # this pool already carries another repeat of the same booking
+        window = (None, None)
+        for m in members:
+            window = RouteMatchingService._overlap(window, (m.delivery_window_start, m.delivery_window_end))
+            if window is None:
+                break
+        if window is None:
+            continue
+        if not compatibility_rules.check_pool(members)["compatible"]:
+            continue
+        plan = _plan(truck, members, pool.split_method or "ton_km")
+        if plan["load"]["unpacked_items"]:
+            continue
+        _apply_plan(pool, members, plan)
+        return {"pool_id": pool.id, "reason": f"joined pool {pool.id} on truck {truck.id}"}
+    return {"pool_id": None,
+            "reason": ("no open pool has a truck going this way in time, with room, "
+                       "a matching delivery window and goods it may carry")}
 
 
 async def _load_pool(db: AsyncSession, pool_id: int) -> Pool:

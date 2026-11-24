@@ -40,6 +40,7 @@ class ShipmentResponse(ShipmentBase):
     id: int
     shipper_id: int
     pool_id: Optional[int] = None
+    recurring_id: Optional[int] = None
     status: ShipmentStatus
     allocated_cost: Optional[float] = None
     created_at: datetime

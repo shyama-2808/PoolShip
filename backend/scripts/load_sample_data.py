@@ -1,8 +1,10 @@
 """
 Loads data/sample_data.json into the PoolShip database through the API.
 
-It creates the 5 sample users (3 shippers, 2 transporters), the 5 trucks and
-the 20 shipments. Safe to run more than once: anything already there is skipped.
+It creates the 5 sample users (3 shippers, 2 transporters), the 7 trucks,
+the 25 shipments and the 4 recurring shipments. Safe to run more than once:
+anything already there is skipped. (Repeats of the recurring shipments are posted
+later by POST /recurring/generate.)
 
 Usage (backend must be running, e.g. `docker compose up`):
     python scripts/load_sample_data.py
@@ -91,7 +93,24 @@ def main():
         created += 1
         print(f"  + shipment '{s['title']}' {s['origin_address']} to {s['destination_address']} (id {res['id']})")
 
-    print(f"\nDone. Users: {len(user_ids)}, trucks: {len(truck_ids)}, new shipments: {created}.")
+    # 4. Recurring shipments: skip any (shipper, title) pair that is already there
+    _, existing = call("GET", f"{api}/recurring/")
+    existing_keys = {(r["shipper_id"], r["title"]) for r in existing} if isinstance(existing, list) else set()
+    new_recurring = 0
+    for r in data.get("recurring_shipments", []):
+        owner = user_ids[r["shipper_key"]]
+        if (owner, r["title"]) in existing_keys:
+            print(f"  = recurring '{r['title']}' already exists")
+            continue
+        body = {k: v for k, v in r.items() if k not in ("id", "shipper_key")}
+        status, res = call("POST", f"{api}/recurring/?shipper_id={owner}", body)
+        if status != 200:
+            sys.exit(f"Could not create recurring shipment '{r['title']}': {res}")
+        new_recurring += 1
+        print(f"  + recurring '{r['title']}' ({res['repeats']})")
+
+    print(f"\nDone. Users: {len(user_ids)}, trucks: {len(truck_ids)}, new shipments: {created}, "
+          f"new recurring: {new_recurring}.")
     print(f"Sample login for any user: password '{password}'.")
 
 

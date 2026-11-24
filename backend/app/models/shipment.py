@@ -20,6 +20,8 @@ class Shipment(Base):
     id = Column(Integer, primary_key=True, index=True)
     shipper_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     pool_id = Column(Integer, ForeignKey("pools.id"), nullable=True)
+    # Set when this shipment is one repeat of a recurring shipment (Task 11)
+    recurring_id = Column(Integer, ForeignKey("recurring_shipments.id"), nullable=True)
 
     title = Column(String, nullable=False)
     goods_type = Column(String, nullable=False)  # e.g., "textiles", "hardware", "perishable"
@@ -58,3 +60,4 @@ class Shipment(Base):
 
     shipper = relationship("User", backref="shipments")
     pool = relationship("Pool", back_populates="shipments")
+    recurring = relationship("RecurringShipment", back_populates="shipments")
