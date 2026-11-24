@@ -22,6 +22,9 @@ class Pool(Base):
     
     status = Column(SQLEnum(PoolStatus), default=PoolStatus.OPEN, nullable=False)
     
+    # How the trip cost is shared: "weight", "volume", "distance" or "ton_km"
+    split_method = Column(String, default="ton_km", nullable=True)
+
     # Aggregated metrics
     total_distance_km = Column(Float, default=0.0)
     total_cost = Column(Float, default=0.0)

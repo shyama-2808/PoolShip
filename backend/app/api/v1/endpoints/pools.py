@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,24 +15,19 @@ from app.services.route_matching import RouteMatchingService
 
 router = APIRouter()
 
+# A shipment can join a pool only while it is still looking for a truck
+_JOINABLE = (ShipmentStatus.POSTED, ShipmentStatus.MATCHED)
 
-@router.post("/optimize", response_model=PoolOptimizationResult)
-async def simulate_pool_optimization(
-    payload: PoolCreate,
-    db: AsyncSession = Depends(get_db)
-):
-    # 1. Fetch Truck
-    res_truck = await db.execute(select(Truck).where(Truck.id == payload.truck_id))
-    truck = res_truck.scalars().first()
-    if not truck:
-        raise HTTPException(status_code=404, detail="Truck not found")
 
-    # 2. Fetch Shipments
-    res_shipments = await db.execute(select(Shipment).where(Shipment.id.in_(payload.shipment_ids)))
-    shipments = res_shipments.scalars().all()
-    if not shipments:
-        raise HTTPException(status_code=400, detail="No matching shipments provided")
+def _road_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    return RouteMatchingService.haversine_distance(lat1, lng1, lat2, lng2) * RouteMatchingService.ROAD_FACTOR
 
+
+def _plan(truck: Truck, shipments: List[Shipment], split_method: str) -> Dict[str, Any]:
+    """
+    Run the engine for one truck and these shipments:
+    pack the truck, price the trip from its distance, split the price, count CO₂ saved.
+    """
     truck_spec = TruckSpec(
         id=truck.id,
         max_weight_kg=truck.max_weight_kg,
@@ -41,87 +36,117 @@ async def simulate_pool_optimization(
         width_cm=truck.width_cm,
         height_cm=truck.height_cm,
     )
-
-    candidate_items = [
+    items = [
         ShipmentItem(
             id=s.id,
             weight_kg=s.weight_kg,
-            volume_cbm=s.volume_cbm or 0.1,
+            volume_cbm=s.volume_cbm or 0.0,  # 0 = work it out from the dimensions
             length_cm=s.length_cm,
             width_cm=s.width_cm,
             height_cm=s.height_cm,
-            is_perishable=s.is_perishable,
-            is_hazardous=s.is_hazardous,
-            is_fragile=s.is_fragile,
+            is_perishable=bool(s.is_perishable),
+            is_hazardous=bool(s.is_hazardous),
+            is_fragile=bool(s.is_fragile),
         )
         for s in shipments
     ]
+    load = CapacityOptimizer.optimize_load(truck_spec, items)
+    packed = load["packed_items"]
 
-    # 3. Run Bin-Packing Optimization
-    optimization_res = CapacityOptimizer.optimize_load(truck_spec, candidate_items)
-    packed_items = optimization_res["packed_items"]
+    trip_km = _road_km(truck.origin_lat, truck.origin_lng, truck.dest_lat, truck.dest_lng)
+    total_cost = CostSplitter.trip_cost(trip_km, truck.rate_per_km)
 
-    # 4. Calculate Distance & Route Cost
-    distance_km = RouteMatchingService.haversine_distance(
-        truck.origin_lat, truck.origin_lng, truck.dest_lat, truck.dest_lng
-    ) * 1.25  # Road network factor
-    total_trip_cost = round(distance_km * truck.rate_per_km, 2)
-
-    # 5. Calculate Cost Split for packed shipments
-    shipments_for_cost = [
-        {
-            "id": item.id,
-            "weight_kg": item.weight_kg,
-            "distance_km": distance_km,
-            "volume_cbm": item.volume_cbm,
-        }
-        for item in packed_items
-    ]
-    cost_splits = {
-        cs["shipment_id"]: cs["allocated_cost"]
-        for cs in CostSplitter.calculate_split(total_trip_cost, shipments_for_cost)
+    by_id = {s.id: s for s in shipments}
+    shares = CostSplitter.calculate_split(
+        total_cost,
+        [
+            {
+                "id": i.id,
+                "weight_kg": i.weight_kg,
+                "volume_cbm": CapacityOptimizer.item_volume(i),
+                "distance_km": _road_km(by_id[i.id].origin_lat, by_id[i.id].origin_lng,
+                                        by_id[i.id].dest_lat, by_id[i.id].dest_lng),
+            }
+            for i in packed
+        ],
+        split_method,
+    )
+    carbon = CarbonCalculator.calculate_savings(
+        pooled_route_distance_km=trip_km, num_participants=len(packed)
+    )
+    return {
+        "trip_km": trip_km,
+        "total_cost": total_cost,
+        "load": load,
+        "cost_by_id": {cs["shipment_id"]: cs["allocated_cost"] for cs in shares},
+        "carbon": carbon,
     }
 
-    # 6. Calculate Carbon Savings
-    carbon_res = CarbonCalculator.calculate_savings(
-        pooled_route_distance_km=distance_km,
-        num_participants=len(packed_items)
-    )
+
+async def _get_truck(db: AsyncSession, truck_id: int) -> Truck:
+    truck = (await db.execute(select(Truck).where(Truck.id == truck_id))).scalars().first()
+    if not truck:
+        raise HTTPException(status_code=404, detail="Truck not found")
+    return truck
+
+
+async def _get_shipments(db: AsyncSession, ids: List[int]) -> List[Shipment]:
+    ids = list(dict.fromkeys(ids))  # drop repeats, keep order
+    found = (await db.execute(select(Shipment).where(Shipment.id.in_(ids)))).scalars().all()
+    missing = sorted(set(ids) - {s.id for s in found})
+    if missing:
+        raise HTTPException(status_code=404, detail=f"Shipments not found: {missing}")
+    return sorted(found, key=lambda s: ids.index(s.id))
+
+
+@router.post("/optimize", response_model=PoolOptimizationResult)
+async def simulate_pool_optimization(
+    payload: PoolCreate,
+    db: AsyncSession = Depends(get_db)
+):
+    """Preview a pool without saving anything: what fits, the trip cost and who pays what."""
+    truck = await _get_truck(db, payload.truck_id)
+    if not payload.shipment_ids:
+        raise HTTPException(status_code=400, detail="No matching shipments provided")
+    shipments = await _get_shipments(db, payload.shipment_ids)
+
+    plan = _plan(truck, shipments, payload.split_method)
+    load, cost_by_id = plan["load"], plan["cost_by_id"]
 
     packed_out = [
         OptimizationItem(
             id=item.id,
             weight_kg=item.weight_kg,
-            volume_cbm=item.volume_cbm,
-            allocated_cost=cost_splits.get(item.id, 0.0),
+            volume_cbm=CapacityOptimizer.item_volume(item),
+            allocated_cost=cost_by_id.get(item.id, 0.0),
             fits=True,
             reason="Fits within weight, volume and compatibility limits",
         )
-        for item in packed_items
+        for item in load["packed_items"]
     ]
-
     unpacked_out = [
         OptimizationItem(
             id=u["item"].id,
             weight_kg=u["item"].weight_kg,
-            volume_cbm=u["item"].volume_cbm,
+            volume_cbm=CapacityOptimizer.item_volume(u["item"]),
             allocated_cost=0.0,
             fits=False,
             reason=u["reason"],
         )
-        for u in optimization_res["unpacked_items"]
+        for u in load["unpacked_items"]
     ]
 
     return PoolOptimizationResult(
         truck_id=truck.id,
-        total_weight_kg=optimization_res["total_packed_weight_kg"],
-        total_volume_cbm=optimization_res["total_packed_volume_cbm"],
-        weight_utilization_pct=optimization_res["weight_utilization_pct"],
-        volume_utilization_pct=optimization_res["volume_utilization_pct"],
-        overall_utilization_pct=optimization_res["overall_utilization_pct"],
-        total_trip_cost=total_trip_cost,
-        total_co2_saved_kg=carbon_res["co2_saved_kg"],
-        total_diesel_saved_litres=carbon_res["diesel_saved_litres"],
+        split_method=payload.split_method,
+        total_weight_kg=load["total_packed_weight_kg"],
+        total_volume_cbm=load["total_packed_volume_cbm"],
+        weight_utilization_pct=load["weight_utilization_pct"],
+        volume_utilization_pct=load["volume_utilization_pct"],
+        overall_utilization_pct=load["overall_utilization_pct"],
+        total_trip_cost=plan["total_cost"],
+        total_co2_saved_kg=plan["carbon"]["co2_saved_kg"],
+        total_diesel_saved_litres=plan["carbon"]["diesel_saved_litres"],
         packed_shipments=packed_out,
         unpacked_shipments=unpacked_out,
     )
@@ -132,36 +157,69 @@ async def create_pool(
     payload: PoolCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    res_truck = await db.execute(select(Truck).where(Truck.id == payload.truck_id))
-    truck = res_truck.scalars().first()
-    if not truck:
-        raise HTTPException(status_code=404, detail="Truck not found")
+    """
+    Create a pool on a truck and put the given shipments in it.
 
-    distance_km = RouteMatchingService.haversine_distance(
-        truck.origin_lat, truck.origin_lng, truck.dest_lat, truck.dest_lng
-    ) * 1.25
-    total_cost = round(distance_km * truck.rate_per_km, 2)
+    Each shipment is linked to the pool (status POOLED) and gets its cost share
+    saved in `allocated_cost`, using the pool's `split_method`. The pool stores
+    the trip cost, load, fill % and CO₂ saved.
+
+    Refused (nothing saved) if a shipment doesn't exist (404), is already in a
+    pool or no longer open (409), or doesn't fit the truck (422, with the reason).
+    Use POST /pools/optimize first to preview.
+    """
+    truck = await _get_truck(db, payload.truck_id)
+    shipments = await _get_shipments(db, payload.shipment_ids) if payload.shipment_ids else []
+
+    taken = [s.id for s in shipments if s.pool_id is not None or s.status not in _JOINABLE]
+    if taken:
+        raise HTTPException(status_code=409, detail=f"Shipments already pooled or no longer open: {taken}")
+
+    plan = _plan(truck, shipments, payload.split_method)
+    load = plan["load"]
+    if load["unpacked_items"]:
+        raise HTTPException(status_code=422, detail={
+            "message": "Some shipments don't fit this truck. Remove them or pick another truck.",
+            "does_not_fit": [{"id": u["item"].id, "reason": u["reason"]} for u in load["unpacked_items"]],
+        })
 
     pool = Pool(
         truck_id=truck.id,
-        status=PoolStatus.OPEN,
-        total_distance_km=distance_km,
-        total_cost=total_cost,
+        status=PoolStatus.OPTIMIZED if shipments else PoolStatus.OPEN,
+        split_method=payload.split_method,
+        total_distance_km=round(plan["trip_km"], 2),
+        total_cost=plan["total_cost"],
+        current_weight_kg=load["total_packed_weight_kg"],
+        current_volume_cbm=load["total_packed_volume_cbm"],
+        utilization_percentage=load["overall_utilization_pct"],
+        co2_saved_kg=plan["carbon"]["co2_saved_kg"],
+        diesel_saved_litres=plan["carbon"]["diesel_saved_litres"],
     )
     db.add(pool)
+    await db.flush()  # gives the pool its id
+
+    for s in shipments:
+        s.pool_id = pool.id
+        s.status = ShipmentStatus.POOLED
+        s.allocated_cost = plan["cost_by_id"][s.id]
+
     await db.commit()
-    await db.refresh(pool)
-    return pool
+    return await _load_pool(db, pool.id)
 
 
-@router.get("/{pool_id}", response_model=PoolResponse)
-async def get_pool(pool_id: int, db: AsyncSession = Depends(get_db)):
+async def _load_pool(db: AsyncSession, pool_id: int) -> Pool:
     result = await db.execute(
         select(Pool)
         .options(selectinload(Pool.shipments), selectinload(Pool.truck))
         .where(Pool.id == pool_id)
+        .execution_options(populate_existing=True)
     )
-    pool = result.scalars().first()
+    return result.scalars().first()
+
+
+@router.get("/{pool_id}", response_model=PoolResponse)
+async def get_pool(pool_id: int, db: AsyncSession = Depends(get_db)):
+    pool = await _load_pool(db, pool_id)
     if not pool:
         raise HTTPException(status_code=404, detail="Pool not found")
     return pool

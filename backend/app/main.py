@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.api import api_router
@@ -13,6 +14,9 @@ async def lifespan(_: FastAPI):
     # Create any missing tables on startup (there are no migrations yet).
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # create_all doesn't add new columns to tables that already exist
+        if conn.dialect.name == "postgresql":
+            await conn.execute(text("ALTER TABLE pools ADD COLUMN IF NOT EXISTS split_method VARCHAR"))
     yield
 
 

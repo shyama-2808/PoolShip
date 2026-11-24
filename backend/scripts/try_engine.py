@@ -52,7 +52,10 @@ def main():
             f"packed {[i['id'] for i in r['packed_items']]}, "
             f"left out {[(i['id'], i['reason']) for i in r['unpacked_items']]}, "
             f"utilisation {r['overall_utilization_pct']}%"),
-        "/engine/cost-split": lambda r: ", ".join(
+        "/engine/assign-trucks": lambda r: "; ".join(
+            [f"truck {t['truck_id']} takes {t['shipment_ids']} ({t['overall_utilization_pct']}% full)"
+             for t in r["trucks"]] + [f"left over {[i['id'] for i in r['leftover_items']]}"]),
+        "/engine/cost-split": lambda r: f"trip Rs {r['total_trip_cost']} by {r['split_method']}: " + ", ".join(
             f"shipment {s['shipment_id']} pays Rs {s['allocated_cost']}" for s in r["shares"]),
         "/engine/carbon": lambda r: f"{r['co2_saved_kg']} kg CO2 and {r['diesel_saved_litres']} L diesel saved",
         "/engine/route/distance": lambda r: f"{r['straight_line_km']} km straight, ~{r['estimated_road_km']} km by road",

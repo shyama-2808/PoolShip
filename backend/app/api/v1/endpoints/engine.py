@@ -12,6 +12,7 @@ from fastapi import APIRouter, Body, HTTPException
 
 from app.core.sample_data import load_sample_data
 from app.schemas.engine import (
+    AssignTrucksRequest, AssignTrucksResponse,
     CarbonRequest, CarbonResponse,
     CompatibilityRequest, CompatibilityResponse,
     CorridorCheckRequest, CorridorCheckResponse,
@@ -26,7 +27,7 @@ from app.schemas.engine import (
 )
 from app.services.capacity_optimizer import CapacityOptimizer, ShipmentItem, TruckSpec
 from app.services.carbon_calculator import CarbonCalculator
-from app.services.cost_splitter import CostSplitter
+from app.services.cost_splitter import CostSplitter, to_paise
 from app.services.route_matching import RouteMatchingService
 
 router = APIRouter()
@@ -65,12 +66,27 @@ def _optimize(truck: EngineTruck, shipments: List[EngineShipment]) -> Dict[str, 
     return res
 
 
+def _assign(trucks: List[EngineTruck], shipments: List[EngineShipment]) -> Dict[str, Any]:
+    res = CapacityOptimizer.assign_to_trucks([_to_spec(t) for t in trucks], [_to_item(s) for s in shipments])
+    for load in res["trucks"]:
+        load["packed_items"] = [
+            {"id": i.id, "weight_kg": i.weight_kg, "volume_cbm": round(i.volume_cbm, 3)}
+            for i in load["packed_items"]
+        ]
+    res["leftover_items"] = [
+        {"id": u["item"].id, "weight_kg": u["item"].weight_kg,
+         "volume_cbm": round(u["item"].volume_cbm, 3), "reason": u["reason"]}
+        for u in res["leftover_items"]
+    ]
+    return res
+
+
 def _cost_split(total: float, shipments: List[Dict[str, Any]], method: str) -> Dict[str, Any]:
     try:
         shares = CostSplitter.calculate_split(total, shipments, split_method=method)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    return {"split_method": method, "total_trip_cost": total, "shares": shares}
+    return {"split_method": method, "total_trip_cost": to_paise(total) / 100, "shares": shares}
 
 
 # ---------------------------------------------------------------------------
@@ -92,6 +108,7 @@ _SHIP_FIELDS = {"id", "weight_kg", "volume_cbm", "length_cm", "width_cm", "heigh
                 "is_perishable", "is_hazardous", "is_fragile",
                 "origin_lat", "origin_lng", "dest_lat", "dest_lng"}
 _T1_EX = {k: v for k, v in _T1.items() if k in _TRUCK_FIELDS}
+_T5_EX = {k: v for k, v in next(t for t in _DATA["trucks"] if t["id"] == 5).items() if k in _TRUCK_FIELDS}
 _S1_EX = [{k: v for k, v in s.items() if k in _SHIP_FIELDS} for s in _S1]
 _ALL_SHIP_EX = [{k: v for k, v in s.items() if k in _SHIP_FIELDS} for s in _DATA["shipments"]]
 _POOL_FIELDS = _SHIP_FIELDS | {"origin_address", "destination_address",
@@ -136,21 +153,44 @@ def optimize_load(
     return _optimize(payload.truck, payload.shipments)
 
 
+@router.post("/assign-trucks", response_model=AssignTrucksResponse,
+             summary="Spread a pool's shipments over several trucks (no truck overloaded)")
+def assign_trucks(
+    payload: AssignTrucksRequest = Body(openapi_examples=_ex(
+        "Bengaluru to Chennai pool (shipments 1 to 6, 3,400 kg) over trucks 1 and 5",
+        {"trucks": [_T1_EX, _T5_EX], "shipments": _S1_EX},
+    )),
+):
+    """
+    First-fit decreasing: biggest shipments first, each into the first truck
+    (in the order you list them) that still has room by weight, volume and size,
+    and holds nothing it can't travel with (e.g. food and chemicals).
+    Returns each truck's load and fill %, plus leftovers with the reason.
+    """
+    return _assign(payload.trucks, payload.shipments)
+
+
 @router.post("/cost-split", response_model=CostSplitResponse,
              summary="Split the trip cost fairly between shippers")
 def cost_split(
     payload: CostSplitRequest = Body(openapi_examples=_ex(
-        "₹12,000 trip shared by 3 shippers",
-        {"total_trip_cost": 12000, "split_method": "ton_km", "shipments": [
+        "413 km trip at ₹28/km shared by 3 shippers",
+        {"trip_distance_km": 413, "rate_per_km": 28, "split_method": "weight", "shipments": [
             {"id": 1, "weight_kg": 600, "distance_km": 413, "volume_cbm": 1.8},
             {"id": 2, "weight_kg": 450, "distance_km": 340, "volume_cbm": 0.96},
             {"id": 5, "weight_kg": 350, "distance_km": 160, "volume_cbm": 0.99},
         ]},
     )),
 ):
-    return _cost_split(
-        payload.total_trip_cost, [s.model_dump() for s in payload.shipments], payload.split_method
-    )
+    """
+    Pick split_method per pool: weight, volume, distance or ton_km.
+    Send total_trip_cost, or trip_distance_km + rate_per_km to have it worked out.
+    Shares are in whole paise and always add up exactly to the trip cost.
+    """
+    total = payload.total_trip_cost
+    if total is None:
+        total = CostSplitter.trip_cost(payload.trip_distance_km, payload.rate_per_km)
+    return _cost_split(total, [s.model_dump() for s in payload.shipments], payload.split_method)
 
 
 @router.post("/carbon", response_model=CarbonResponse,
@@ -289,7 +329,7 @@ def _plan(payload: PlanPoolRequest) -> Dict[str, Any]:
 
     # 3. Cost split: truck trip price shared by what was packed
     trip_km = route["truck_route_km"]
-    total_cost = round(trip_km * truck.rate_per_km, 2)
+    total_cost = CostSplitter.trip_cost(trip_km, truck.rate_per_km)
     packed = load["packed_items"]
     split = _cost_split(
         total_cost,

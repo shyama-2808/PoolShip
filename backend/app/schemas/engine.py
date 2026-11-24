@@ -7,7 +7,10 @@ Units: weight kg, volume m³ (cbm), dimensions cm, distance km, money ₹.
 """
 from datetime import datetime
 from typing import List, Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+# How a pool's trip cost is shared between shippers
+SplitMethod = Literal["weight", "volume", "distance", "ton_km"]
 
 
 class EngineShipment(BaseModel):
@@ -92,6 +95,31 @@ class OptimizeLoadResponse(BaseModel):
     unpacked_items: List[UnpackedItem]
 
 
+# ---- 2b. Spread a pool over several trucks (first-fit decreasing) --------------
+class AssignTrucksRequest(BaseModel):
+    trucks: List[EngineTruck] = Field(min_length=1, description="Trucks to fill, preferred first")
+    shipments: List[EngineShipment] = Field(description="The pool's shipments")
+
+
+class TruckLoad(BaseModel):
+    truck_id: int
+    shipment_ids: List[int]
+    packed_items: List[PackedItem]
+    total_weight_kg: float
+    total_volume_cbm: float
+    remaining_weight_kg: float
+    remaining_volume_cbm: float
+    weight_utilization_pct: float
+    volume_utilization_pct: float
+    overall_utilization_pct: float = Field(description="Fill %: the higher of weight % and volume %")
+
+
+class AssignTrucksResponse(BaseModel):
+    trucks_used: int
+    trucks: List[TruckLoad]
+    leftover_items: List[UnpackedItem] = Field(description="Shipments that fit no truck, with the reason")
+
+
 # ---- 3. Cost split ------------------------------------------------------------
 class CostSplitShipment(BaseModel):
     id: int
@@ -101,15 +129,30 @@ class CostSplitShipment(BaseModel):
 
 
 class CostSplitRequest(BaseModel):
-    total_trip_cost: float = Field(gt=0, description="Total ₹ for the truck trip")
-    shipments: List[CostSplitShipment]
-    split_method: Literal["ton_km", "weight", "volume"] = "ton_km"
+    total_trip_cost: Optional[float] = Field(
+        default=None, gt=0,
+        description="Total ₹ for the truck trip. Leave out to work it out as trip_distance_km × rate_per_km.",
+    )
+    trip_distance_km: Optional[float] = Field(default=None, gt=0, description="Truck trip length (km)")
+    rate_per_km: Optional[float] = Field(default=None, gt=0, description="Truck's ₹ per km")
+    shipments: List[CostSplitShipment] = Field(min_length=1)
+    split_method: SplitMethod = Field(
+        default="ton_km",
+        description="weight (kg), volume (m³), distance (km travelled) or ton_km (tonnes × km)",
+    )
+
+    @model_validator(mode="after")
+    def _need_a_cost(self):
+        if self.total_trip_cost is None and (self.trip_distance_km is None or self.rate_per_km is None):
+            raise ValueError("Give total_trip_cost, or both trip_distance_km and rate_per_km")
+        return self
 
 
 class CostShare(BaseModel):
     shipment_id: int
     share_ratio: float
-    allocated_cost: float
+    allocated_cost: float = Field(description="₹ this shipper pays")
+    allocated_paise: int = Field(description="Same amount in paise; these add up exactly to the trip cost")
     savings_vs_dedicated_trip: float
     savings_percentage: Optional[float] = None
     ton_km: Optional[float] = None
@@ -270,7 +313,10 @@ class PlanPoolRequest(BaseModel):
     truck: EngineTruckWithRoute
     shipments: List[EngineShipmentWithRoute]
     corridor_tolerance_km: float = Field(default=40.0, gt=0)
-    split_method: Literal["ton_km", "weight", "volume"] = "ton_km"
+    split_method: SplitMethod = Field(
+        default="ton_km",
+        description="weight (kg), volume (m³), distance (km travelled) or ton_km (tonnes × km)",
+    )
 
 
 class PlanPoolResponse(BaseModel):
