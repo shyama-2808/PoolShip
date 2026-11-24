@@ -13,7 +13,7 @@ from fastapi import APIRouter, Body, HTTPException
 from app.core.sample_data import load_sample_data
 from app.schemas.engine import (
     AssignTrucksRequest, AssignTrucksResponse,
-    CarbonRequest, CarbonResponse,
+    CarbonCompareRequest, CarbonRequest, CarbonResponse,
     CompatibilityRequest, CompatibilityResponse,
     CorridorCheckRequest, CorridorCheckResponse,
     CostSplitRequest, CostSplitResponse,
@@ -205,6 +205,22 @@ def carbon(
     )
 
 
+@router.post("/carbon/compare", response_model=CarbonResponse,
+             summary="Fuel and CO₂: each shipper's own truck versus one pooled truck")
+def carbon_compare(
+    payload: CarbonCompareRequest = Body(openapi_examples=_ex(
+        "3 shippers (413, 380 and 150 km alone) on one 420 km truck",
+        {"separate_trip_km": [413, 380, 150], "pooled_truck_km": 420},
+    )),
+):
+    """
+    Litres of diesel, kg CO₂ and percent saved for any pool.
+    `separate_trip_km` lists how far each shipper's own truck would drive;
+    `pooled_truck_km` is how far the shared truck drives.
+    """
+    return CarbonCalculator.compare_trips(payload.separate_trip_km, payload.pooled_truck_km)
+
+
 @router.post("/route/distance", response_model=DistanceResponse,
              summary="Distance between two points")
 def route_distance(
@@ -338,8 +354,8 @@ def _plan(payload: PlanPoolRequest) -> Dict[str, Any]:
         payload.split_method,
     ) if packed else {"split_method": payload.split_method, "total_trip_cost": total_cost, "shares": []}
 
-    # 4. Carbon saved by pooling the packed shipments
-    co2 = CarbonCalculator.calculate_savings(trip_km, max(len(packed), 1))
+    # 4. Fuel and CO₂: each packed shipment on its own truck vs. this one truck
+    co2 = CarbonCalculator.compare_trips([distance_by_id[p["id"]] for p in packed], trip_km)
 
     return {
         "truck_id": truck.id, "truck_route_km": trip_km, "total_trip_cost": total_cost,

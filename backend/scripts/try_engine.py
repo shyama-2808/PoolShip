@@ -58,6 +58,9 @@ def main():
         "/engine/cost-split": lambda r: f"trip Rs {r['total_trip_cost']} by {r['split_method']}: " + ", ".join(
             f"shipment {s['shipment_id']} pays Rs {s['allocated_cost']}" for s in r["shares"]),
         "/engine/carbon": lambda r: f"{r['co2_saved_kg']} kg CO2 and {r['diesel_saved_litres']} L diesel saved",
+        "/engine/carbon/compare": lambda r: (
+            f"separate {r['baseline_diesel_litres']} L vs pooled {r['pooled_diesel_litres']} L: "
+            f"{r['co2_saved_kg']} kg CO2 saved ({r['co2_reduction_percentage']}%)"),
         "/engine/route/distance": lambda r: f"{r['straight_line_km']} km straight, ~{r['estimated_road_km']} km by road",
         "/engine/route/corridor-check": lambda r: (
             f"on_corridor={r['on_corridor']} (pickup {r['pickup_offset_km']} km off, drop {r['drop_offset_km']} km off)"),

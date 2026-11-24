@@ -8,6 +8,7 @@ from app.models.truck import Truck
 from app.models.shipment import Shipment, ShipmentStatus
 from app.models.pool import Pool, PoolStatus
 from app.schemas.pool import PoolCreate, PoolResponse, PoolOptimizationResult, OptimizationItem
+from app.schemas.engine import PoolCarbonResponse
 from app.services.capacity_optimizer import CapacityOptimizer, ShipmentItem, TruckSpec
 from app.services.cost_splitter import CostSplitter
 from app.services.carbon_calculator import CarbonCalculator
@@ -21,6 +22,15 @@ _JOINABLE = (ShipmentStatus.POSTED, ShipmentStatus.MATCHED)
 
 def _road_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return RouteMatchingService.haversine_distance(lat1, lng1, lat2, lng2) * RouteMatchingService.ROAD_FACTOR
+
+
+def _shipment_km(s: Shipment) -> float:
+    """How far this shipment's own truck would drive without pooling."""
+    return _road_km(s.origin_lat, s.origin_lng, s.dest_lat, s.dest_lng)
+
+
+def _truck_km(truck: Truck) -> float:
+    return _road_km(truck.origin_lat, truck.origin_lng, truck.dest_lat, truck.dest_lng)
 
 
 def _plan(truck: Truck, shipments: List[Shipment], split_method: str) -> Dict[str, Any]:
@@ -53,7 +63,7 @@ def _plan(truck: Truck, shipments: List[Shipment], split_method: str) -> Dict[st
     load = CapacityOptimizer.optimize_load(truck_spec, items)
     packed = load["packed_items"]
 
-    trip_km = _road_km(truck.origin_lat, truck.origin_lng, truck.dest_lat, truck.dest_lng)
+    trip_km = _truck_km(truck)
     total_cost = CostSplitter.trip_cost(trip_km, truck.rate_per_km)
 
     by_id = {s.id: s for s in shipments}
@@ -64,16 +74,14 @@ def _plan(truck: Truck, shipments: List[Shipment], split_method: str) -> Dict[st
                 "id": i.id,
                 "weight_kg": i.weight_kg,
                 "volume_cbm": CapacityOptimizer.item_volume(i),
-                "distance_km": _road_km(by_id[i.id].origin_lat, by_id[i.id].origin_lng,
-                                        by_id[i.id].dest_lat, by_id[i.id].dest_lng),
+                "distance_km": _shipment_km(by_id[i.id]),
             }
             for i in packed
         ],
         split_method,
     )
-    carbon = CarbonCalculator.calculate_savings(
-        pooled_route_distance_km=trip_km, num_participants=len(packed)
-    )
+    # Fuel and CO₂: each packed shipment on its own truck vs. this one truck
+    carbon = CarbonCalculator.compare_trips([_shipment_km(by_id[i.id]) for i in packed], trip_km)
     return {
         "trip_km": trip_km,
         "total_cost": total_cost,
@@ -223,3 +231,27 @@ async def get_pool(pool_id: int, db: AsyncSession = Depends(get_db)):
     if not pool:
         raise HTTPException(status_code=404, detail="Pool not found")
     return pool
+
+
+@router.get("/{pool_id}/carbon", response_model=PoolCarbonResponse)
+async def get_pool_carbon(pool_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    Fuel and CO₂ for a saved pool: every shipment on its own truck (baseline)
+    versus the pool's one truck. Gives litres, kg CO₂ and percent saved, the
+    emission factors used, and each shipment's separate trip.
+    """
+    pool = await _load_pool(db, pool_id)
+    if not pool:
+        raise HTTPException(status_code=404, detail="Pool not found")
+
+    shipments = sorted(pool.shipments, key=lambda s: s.id)
+    trips = [(s.id, _shipment_km(s)) for s in shipments]
+    result = CarbonCalculator.compare_trips([km for _, km in trips], _truck_km(pool.truck))
+    return {
+        "pool_id": pool.id,
+        "truck_id": pool.truck_id,
+        **result,
+        "separate_trips": [
+            {"shipment_id": sid, **CarbonCalculator.trip_emissions(km)} for sid, km in trips
+        ],
+    }

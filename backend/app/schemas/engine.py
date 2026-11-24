@@ -171,13 +171,57 @@ class CarbonRequest(BaseModel):
     detour_km: float = Field(default=0.0, ge=0)
 
 
+class CarbonCompareRequest(BaseModel):
+    separate_trip_km: List[float] = Field(
+        min_length=1,
+        description="Each shipper's own trip in km (what their own truck would drive without pooling)",
+    )
+    pooled_truck_km: float = Field(ge=0, description="Km the one shared truck drives, detours included")
+
+    @model_validator(mode="after")
+    def _no_negative_trips(self):
+        if any(k < 0 for k in self.separate_trip_km):
+            raise ValueError("separate_trip_km values must be 0 or more")
+        return self
+
+
+class EmissionFactors(BaseModel):
+    diesel_litres_per_km: float
+    km_per_litre: float
+    kg_co2_per_litre_diesel: float
+    kg_co2_per_km: float
+    source: str
+
+
 class CarbonResponse(BaseModel):
+    """Separate trucks (baseline) versus one pooled truck."""
+    num_shipments: int
+    baseline_trucks: int
     baseline_truck_km: float
     pooled_truck_km: float
     km_avoided: float
+    baseline_diesel_litres: float
+    pooled_diesel_litres: float
     diesel_saved_litres: float
+    baseline_co2_kg: float
+    pooled_co2_kg: float
     co2_saved_kg: float
+    fuel_saved_percentage: float
     co2_reduction_percentage: float
+    emission_factors: EmissionFactors
+
+
+class SeparateTrip(BaseModel):
+    shipment_id: int
+    km: float
+    diesel_litres: float
+    co2_kg: float
+
+
+class PoolCarbonResponse(CarbonResponse):
+    pool_id: int
+    truck_id: int
+    separate_trips: List[SeparateTrip]
 
 
 # ---- 5. Route helpers ---------------------------------------------------------

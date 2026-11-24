@@ -27,7 +27,7 @@ class TestEngineApi(unittest.TestCase):
         self.assertEqual(len(data["trucks"]), 5)
 
     def test_every_post_endpoint_accepts_its_example(self):
-        for path in ["/compatibility", "/optimize-load", "/cost-split", "/carbon", "/route/distance",
+        for path in ["/compatibility", "/optimize-load", "/cost-split", "/carbon", "/carbon/compare", "/route/distance",
                      "/route/corridor-check", "/route/match", "/route/pools", "/plan-pool"]:
             with self.subTest(path=path):
                 res = client.post(f"{API}{path}", json=example(path))
