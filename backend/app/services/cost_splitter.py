@@ -64,16 +64,25 @@ class CostSplitter:
                     "savings_percentage": savings_pct,
                 })
 
-        elif split_method == "weight":
-            total_weight = sum(s.get("weight_kg", 0.0) for s in shipments)
+        elif split_method in ("weight", "volume"):
+            # Split in proportion to each shipment's weight (kg) or volume (m³)
+            key = "weight_kg" if split_method == "weight" else "volume_cbm"
+            total = sum(s.get(key) or 0.0 for s in shipments)
             for s in shipments:
-                ratio = s.get("weight_kg", 0.0) / total_weight if total_weight > 0 else 1.0 / len(shipments)
+                ratio = (s.get(key) or 0.0) / total if total > 0 else 1.0 / len(shipments)
                 share = round(ratio * total_trip_cost, 2)
+                savings = round(total_trip_cost - share, 2)
                 results.append({
                     "shipment_id": s["id"],
                     "share_ratio": round(ratio, 4),
                     "allocated_cost": share,
-                    "savings_vs_dedicated_trip": round(total_trip_cost - share, 2),
+                    "savings_vs_dedicated_trip": savings,
+                    "savings_percentage": round((savings / total_trip_cost) * 100, 1) if total_trip_cost > 0 else 0.0,
                 })
+
+        else:
+            raise ValueError(
+                f"Unknown split_method '{split_method}'. Use 'ton_km', 'weight' or 'volume'."
+            )
 
         return results

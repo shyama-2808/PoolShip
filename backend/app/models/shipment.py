@@ -46,13 +46,13 @@ class Shipment(Base):
     dest_lng = Column(Float, nullable=False)
 
     # Timing
-    delivery_window_start = Column(DateTime, nullable=True)
-    delivery_window_end = Column(DateTime, nullable=True)
+    delivery_window_start = Column(DateTime(timezone=True), nullable=True)
+    delivery_window_end = Column(DateTime(timezone=True), nullable=True)
 
     status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.POSTED, nullable=False)
     allocated_cost = Column(Float, nullable=True)  # Allocated share from pool
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     shipper = relationship("User", backref="shipments")
     pool = relationship("Pool", back_populates="shipments")

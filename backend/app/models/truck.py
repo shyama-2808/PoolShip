@@ -29,11 +29,11 @@ class Truck(Base):
     dest_lat = Column(Float, nullable=False)
     dest_lng = Column(Float, nullable=False)
 
-    available_date = Column(DateTime, nullable=False)
+    available_date = Column(DateTime(timezone=True), nullable=False)
     rate_per_km = Column(Float, default=35.0)  # in INR
     is_active = Column(Boolean, default=True)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     transporter = relationship("User", backref="trucks")
     pools = relationship("Pool", back_populates="truck")

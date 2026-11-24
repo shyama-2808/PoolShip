@@ -36,7 +36,7 @@ class Pool(Base):
     # Route polyline encoded or geojson
     route_geometry = Column(String, nullable=True)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     truck = relationship("Truck", back_populates="pools")
     shipments = relationship("Shipment", back_populates="pool")

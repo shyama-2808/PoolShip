@@ -1,9 +1,23 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.api.v1.api import api_router
+from app.db.base import Base
+from app.db.session import engine
+import app.models  # noqa: F401  (registers all tables on Base.metadata)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    # Create any missing tables on startup (there are no migrations yet).
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+
 
 app = FastAPI(
+    lifespan=lifespan,
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
     description="Peer-to-peer freight pooling platform API for small businesses and transporters.",

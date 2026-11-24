@@ -20,6 +20,6 @@ class TrackingEvent(Base):
     digital_signature = Column(String, nullable=True)
     delivery_otp = Column(String, nullable=True)
 
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     pool = relationship("Pool", back_populates="tracking_events")
