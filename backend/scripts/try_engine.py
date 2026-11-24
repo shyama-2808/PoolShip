@@ -70,6 +70,18 @@ def main():
         "/engine/route/pools": lambda r: (
             f"pools {[p['shipment_ids'] for p in r['pools']]}, "
             f"unmatched {[u['shipment_id'] for u in r['unmatched']]}"),
+        "/engine/compatibility/pool": lambda r: f"compatible={r['compatible']} ({r['reason']})",
+        "/engine/route/optimize-stops": lambda r: (
+            f"{r['total_km']} km in best order vs {r['as_listed_km']} km as listed "
+            f"(saves {r['km_saved']} km, {r['method']}, {r['distance_source']})"),
+        "/engine/return-trip": lambda r: (
+            f"home from {r['return_route']['from']['place']} at {r['return_route']['departs_at']}: "
+            f"carries {[m['shipment_id'] for m in r['matched']]}, earns Rs {r['return_trip_earnings']}"),
+        "/engine/price": lambda r: (
+            f"base Rs {r['base_price']} x {r['multiplier']} = Rs {r['price']}"
+            + (f" (capped {r['capped']})" if r["capped"] else "")),
+        "/engine/eta": lambda r: (
+            f"ETA {r['eta']}, flag {r['delay_flag']}, likely late {r['late_shipments']}"),
         "/engine/plan-pool": lambda r: (
             f"packed {[i['id'] for i in r['load']['packed_items']]}, trip Rs {r['total_trip_cost']}, "
             f"CO2 saved {r['carbon']['co2_saved_kg']} kg"),
@@ -100,6 +112,19 @@ def main():
     report("GET /engine/demo-pools (group all sample shipments)", status, r,
            lambda r: (f"pools {[p['shipment_ids'] for p in r['pools']]}, "
                       f"unmatched {[(u['shipment_id'], u['reason']) for u in r['unmatched']]}"))
+
+    # 3. Phase 3 one-click demos
+    for t in (data["trucks"] if status == 200 else []):
+        s, r = call("GET", f"{api}/engine/demo-return/{t['id']}")
+        report(f"GET /engine/demo-return/{t['id']} (way home)", s, r,
+               lambda r: (f"carries {[m['shipment_id'] for m in r['matched']]} home, "
+                          f"{r['load']['overall_utilization_pct']}% full, earns Rs {r['return_trip_earnings']}"))
+    s, r = call("GET", f"{api}/engine/demo-price/2")
+    report("GET /engine/demo-price/2 (same shipment, different situations)", s, r,
+           lambda r: "; ".join(f"{x['scenario'].split(':')[0]}: Rs {x['price']}" for x in r["scenarios"]))
+    s, r = call("GET", f"{api}/engine/demo-eta")
+    report("GET /engine/demo-eta (every sample pool)", s, r,
+           lambda r: "; ".join(f"truck {p['truck_id']} ETA {p['eta'][:16]} {p['delay_flag']}" for p in r))
 
     print(f"\n{'All engine endpoints work.' if failures == 0 else f'{failures} call(s) failed.'}")
     sys.exit(1 if failures else 0)

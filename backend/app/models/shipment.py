@@ -35,6 +35,8 @@ class Shipment(Base):
     is_perishable = Column(Boolean, default=False)
     is_hazardous = Column(Boolean, default=False)
     is_fragile = Column(Boolean, default=False)
+    # "ambient", "chilled" (2 to 8 °C) or "frozen" (-18 °C); chilled and frozen can't share a truck
+    temperature_class = Column(String, default="ambient", nullable=True)
 
     # Locations
     origin_address = Column(String, nullable=False)

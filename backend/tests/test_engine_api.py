@@ -21,9 +21,9 @@ def example(path):
 
 
 class TestEngineApi(unittest.TestCase):
-    def test_sample_data_has_20_shipments_and_5_trucks(self):
+    def test_sample_data_has_25_shipments_and_5_trucks(self):
         data = client.get(f"{API}/sample-data").json()
-        self.assertEqual(len(data["shipments"]), 20)
+        self.assertEqual(len(data["shipments"]), 25)  # 21 to 25 are return loads (Task 8)
         self.assertEqual(len(data["trucks"]), 5)
 
     def test_every_post_endpoint_accepts_its_example(self):
@@ -111,14 +111,17 @@ class TestFindPools(unittest.TestCase):
     def test_sample_shipments_come_back_grouped(self):
         res = client.get(f"{API}/demo-pools").json()
         groups = sorted(sorted(p["shipment_ids"]) for p in res["pools"])
-        self.assertEqual(groups, [[1, 2, 3, 4, 5, 6], [7, 8, 9, 10], [11, 12, 13, 14],
-                                  [15, 16, 17], [18, 19]])
-        self.assertEqual([u["shipment_id"] for u in res["unmatched"]], [20])
+        # Shipment 4 (paint thinner) is on the same route as 1 to 6, but Task 7's rules keep
+        # chemicals away from the mangoes (3), so it is left out of that pool
+        # 21 to 24 head home from Chennai to Bengaluru (Task 8's return loads)
+        self.assertEqual(groups, [[1, 2, 3, 5, 6], [7, 8, 9, 10], [11, 12, 13, 14],
+                                  [15, 16, 17], [18, 19], [21, 22, 23, 24]])
+        self.assertEqual([u["shipment_id"] for u in res["unmatched"]], [4, 20, 25])
 
     def test_every_shipment_appears_exactly_once(self):
         res = client.get(f"{API}/demo-pools").json()
         ids = [i for p in res["pools"] for i in p["shipment_ids"]] + [u["shipment_id"] for u in res["unmatched"]]
-        self.assertEqual(sorted(ids), list(range(1, 21)))
+        self.assertEqual(sorted(ids), list(range(1, 26)))
 
     def test_shared_window_is_what_everyone_accepts(self):
         res = client.get(f"{API}/demo-pools").json()

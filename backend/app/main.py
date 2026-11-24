@@ -17,6 +17,9 @@ async def lifespan(_: FastAPI):
         # create_all doesn't add new columns to tables that already exist
         if conn.dialect.name == "postgresql":
             await conn.execute(text("ALTER TABLE pools ADD COLUMN IF NOT EXISTS split_method VARCHAR"))
+            await conn.execute(text(
+                "ALTER TABLE shipments ADD COLUMN IF NOT EXISTS temperature_class VARCHAR DEFAULT 'ambient'"
+            ))
     yield
 
 

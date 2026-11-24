@@ -2,6 +2,8 @@ import math
 from datetime import datetime
 from typing import List, Dict, Any, Tuple, Optional
 
+from app.services import compatibility_rules
+
 
 class RouteMatchingService:
     """
@@ -327,7 +329,9 @@ class RouteMatchingService:
         Two shipments have a "similar route" when:
           * ROUTE: both pickup and drop of one lie close to (within
             `corridor_tolerance_km` of) the other's path, in the same direction, and
-          * TIME: their delivery windows overlap.
+          * TIME: their delivery windows overlap, and
+          * GOODS: they may share a truck (compatibility_rules: e.g. food never
+            rides with chemicals).
 
         How it groups (greedy, simple and predictable):
           1. Sort shipments longest trip first. The longest trip in a group becomes
@@ -368,6 +372,8 @@ class RouteMatchingService:
                 shared = cls._overlap(window, cls._window(other))
                 if shared is None:
                     continue
+                if compatibility_rules.first_block([m for m, _ in members], other):
+                    continue
                 window = shared
                 assigned.add(other["id"])
                 members.append((other, fit))
@@ -378,6 +384,7 @@ class RouteMatchingService:
 
         # Number pools in the order of their lowest shipment id
         groups.sort(key=lambda g: min(m["id"] for m, _ in g["members"]))
+        pool_of = {m["id"]: [x for x, _ in g["members"]] for g in groups for m, _ in g["members"]}
 
         pools: List[Dict[str, Any]] = []
         unmatched: List[Dict[str, Any]] = []
@@ -385,7 +392,7 @@ class RouteMatchingService:
             if len(g["members"]) < 2:
                 unmatched.append({
                     "shipment_id": g["anchor"]["id"],
-                    "reason": cls._why_alone(g["anchor"], shipments, corridor_tolerance_km),
+                    "reason": cls._why_alone(g["anchor"], shipments, corridor_tolerance_km, pool_of),
                 })
                 continue
             anchor, (w_start, w_end) = g["anchor"], g["window"]
@@ -424,8 +431,15 @@ class RouteMatchingService:
         }
 
     @classmethod
-    def _why_alone(cls, shipment: Dict[str, Any], all_shipments: List[Dict[str, Any]], tol: float) -> str:
+    def _why_alone(
+        cls,
+        shipment: Dict[str, Any],
+        all_shipments: List[Dict[str, Any]],
+        tol: float,
+        pool_of: Optional[Dict[Any, List[Dict[str, Any]]]] = None,
+    ) -> str:
         """Explain in plain words why a shipment ended up without a pool."""
+        pool_of = pool_of or {}
         same_route_other_time = []
         for other in all_shipments:
             if other["id"] == shipment["id"]:
@@ -438,11 +452,13 @@ class RouteMatchingService:
             if on_other or on_mine:
                 if cls._overlap(cls._window(shipment), cls._window(other)) is None:
                     same_route_other_time.append(other["id"])
-                else:
-                    return (f"shares a route with shipment {other['id']}, but that shipment "
-                            "was already placed in a pool whose delivery window doesn't fit")
+                    continue
+                clash = compatibility_rules.first_block(pool_of.get(other["id"], [other]), shipment)
+                if clash:
+                    return f"shares a route with shipment {other['id']}, but can't join its pool. {clash}"
+                return (f"shares a route with shipment {other['id']}, but that shipment "
+                        "was already placed in a pool whose delivery window doesn't fit")
         if same_route_other_time:
             ids = ", ".join(str(i) for i in same_route_other_time)
             return f"shares a route with shipment(s) {ids}, but their delivery windows don't overlap"
         return "no other open shipment travels a similar route"
-

@@ -1,4 +1,5 @@
-from typing import Any, Dict, List
+from datetime import timezone
+from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -7,8 +8,10 @@ from app.db.session import get_db
 from app.models.truck import Truck
 from app.models.shipment import Shipment, ShipmentStatus
 from app.models.pool import Pool, PoolStatus
+from app.models.tracking import TrackingEvent
 from app.schemas.pool import PoolCreate, PoolResponse, PoolOptimizationResult, OptimizationItem
-from app.schemas.engine import PoolCarbonResponse
+from app.schemas.engine import EtaResponse, PoolCarbonResponse
+from app.services import compatibility_rules, delay_predictor, route_optimizer
 from app.services.capacity_optimizer import CapacityOptimizer, ShipmentItem, TruckSpec
 from app.services.cost_splitter import CostSplitter
 from app.services.carbon_calculator import CarbonCalculator
@@ -57,6 +60,8 @@ def _plan(truck: Truck, shipments: List[Shipment], split_method: str) -> Dict[st
             is_perishable=bool(s.is_perishable),
             is_hazardous=bool(s.is_hazardous),
             is_fragile=bool(s.is_fragile),
+            goods_type=s.goods_type,
+            temperature_class=s.temperature_class or "ambient",
         )
         for s in shipments
     ]
@@ -173,7 +178,9 @@ async def create_pool(
     the trip cost, load, fill % and CO₂ saved.
 
     Refused (nothing saved) if a shipment doesn't exist (404), is already in a
-    pool or no longer open (409), or doesn't fit the truck (422, with the reason).
+    pool or no longer open (409), holds goods that can't share a truck, e.g.
+    food with chemicals (422, with the clashing pairs), or doesn't fit the
+    truck (422, with the reason).
     Use POST /pools/optimize first to preview.
     """
     truck = await _get_truck(db, payload.truck_id)
@@ -182,6 +189,14 @@ async def create_pool(
     taken = [s.id for s in shipments if s.pool_id is not None or s.status not in _JOINABLE]
     if taken:
         raise HTTPException(status_code=409, detail=f"Shipments already pooled or no longer open: {taken}")
+
+    # Compatibility check before pooling: e.g. perishables + chemicals is rejected
+    compat = compatibility_rules.check_pool(shipments)
+    if not compat["compatible"]:
+        raise HTTPException(status_code=422, detail={
+            "message": compat["reason"],
+            "conflicts": compat["conflicts"],
+        })
 
     plan = _plan(truck, shipments, payload.split_method)
     load = plan["load"]
@@ -225,12 +240,80 @@ async def _load_pool(db: AsyncSession, pool_id: int) -> Pool:
     return result.scalars().first()
 
 
+# Pools that are planned or on the road (not finished, not cancelled)
+_ACTIVE = (PoolStatus.OPEN, PoolStatus.OPTIMIZED, PoolStatus.LOCKED, PoolStatus.IN_TRANSIT)
+
+
+async def _pool_eta(db: AsyncSession, pool: Pool) -> Dict[str, Any]:
+    """
+    ETA and delay flag for a saved pool.
+    Planned pool: the truck leaves its origin at its available_date and does every pickup and drop.
+    In transit with a tracking ping: it leaves from the last ping at the ping's time, with
+    everything already loaded, so only the drops take time.
+    """
+    truck = pool.truck
+    ships = sorted(pool.shipments, key=lambda s: s.id)
+    start = {"lat": truck.origin_lat, "lng": truck.origin_lng, "place": truck.origin_city}
+    departure = truck.available_date
+    loaded: set = set()
+    rows = [{"id": s.id, "origin_lat": s.origin_lat, "origin_lng": s.origin_lng, "dest_lat": s.dest_lat,
+             "dest_lng": s.dest_lng, "origin_address": s.origin_address,
+             "destination_address": s.destination_address} for s in ships]
+
+    if pool.status == PoolStatus.IN_TRANSIT:
+        last: Optional[TrackingEvent] = (await db.execute(
+            select(TrackingEvent).where(TrackingEvent.pool_id == pool.id)
+            .order_by(TrackingEvent.timestamp.desc()).limit(1)
+        )).scalars().first()
+        if last is not None:
+            start = {"lat": last.latitude, "lng": last.longitude, "place": last.location_name}
+            departure = last.timestamp
+            loaded = {s.id for s in ships}
+            for r in rows:  # already on board: "pick up" where the truck is now
+                r["origin_lat"], r["origin_lng"], r["origin_address"] = last.latitude, last.longitude, "on board"
+
+    if departure is not None and departure.tzinfo is None:
+        departure = departure.replace(tzinfo=timezone.utc)  # SQLite drops the time zone
+    plan = route_optimizer.optimize_stops_offline(rows, start)
+    deadlines = {}
+    for s in ships:
+        end = s.delivery_window_end
+        deadlines[s.id] = end.replace(tzinfo=timezone.utc) if end is not None and end.tzinfo is None else end
+    res = delay_predictor.predict(plan, departure, deadlines, already_loaded=loaded)
+    return {"pool_id": pool.id, "truck_id": pool.truck_id, "status": pool.status.value, **res}
+
+
+@router.get("/active/eta", response_model=List[EtaResponse])
+async def get_active_pool_etas(db: AsyncSession = Depends(get_db)):
+    """ETA and delay flag for every active pool that has shipments (open, optimized, locked or in transit)."""
+    result = await db.execute(
+        select(Pool).options(selectinload(Pool.shipments), selectinload(Pool.truck))
+        .where(Pool.status.in_(_ACTIVE)).order_by(Pool.id)
+    )
+    return [await _pool_eta(db, p) for p in result.scalars().all() if p.shipments]
+
+
 @router.get("/{pool_id}", response_model=PoolResponse)
 async def get_pool(pool_id: int, db: AsyncSession = Depends(get_db)):
     pool = await _load_pool(db, pool_id)
     if not pool:
         raise HTTPException(status_code=404, detail="Pool not found")
     return pool
+
+
+@router.get("/{pool_id}/eta", response_model=EtaResponse)
+async def get_pool_eta(pool_id: int, db: AsyncSession = Depends(get_db)):
+    """
+    When the pool's truck should reach each drop, and whether each shipment is likely late.
+    Traffic: time-of-day model (rush hour x1.5, night x0.9, day x1.15), 30 min per stop,
+    30 min break every 4 h of driving. Flags: late, at_risk (under 2 h to spare), on_time.
+    """
+    pool = await _load_pool(db, pool_id)
+    if not pool:
+        raise HTTPException(status_code=404, detail="Pool not found")
+    if not pool.shipments:
+        raise HTTPException(status_code=400, detail="Pool has no shipments yet, so there is nothing to time")
+    return await _pool_eta(db, pool)
 
 
 @router.get("/{pool_id}/carbon", response_model=PoolCarbonResponse)

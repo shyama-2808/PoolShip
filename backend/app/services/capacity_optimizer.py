@@ -1,6 +1,8 @@
 from typing import List, Dict, Any, Optional, Tuple
 from dataclasses import dataclass
 
+from app.services import compatibility_rules
+
 
 # Small allowance so 2500.0000001 kg of float maths still counts as 2500 kg
 _EPS = 1e-9
@@ -17,6 +19,8 @@ class ShipmentItem:
     is_perishable: bool = False
     is_hazardous: bool = False
     is_fragile: bool = False
+    goods_type: Optional[str] = None          # e.g. "chemicals", "perishable" (see compatibility_rules)
+    temperature_class: str = "ambient"        # "ambient", "chilled" or "frozen"
 
 
 @dataclass
@@ -38,20 +42,12 @@ class CapacityOptimizer:
     @staticmethod
     def check_compatibility(existing_items: List[ShipmentItem], candidate: ShipmentItem) -> Tuple[bool, str]:
         """
-        Enforce business & safety compatibility rules:
-        - Perishables cannot be mixed with hazardous chemicals.
-        - Fragile items require careful load balancing.
+        Can `candidate` share a truck with `existing_items`?
+        Uses the rule table in compatibility_rules.py (e.g. food never rides with chemicals,
+        chilled and frozen goods never share a hold). Returns (ok, reason).
         """
-        has_hazardous = any(item.is_hazardous for item in existing_items)
-        has_perishable = any(item.is_perishable for item in existing_items)
-
-        if candidate.is_hazardous and has_perishable:
-            return False, "Hazardous materials cannot be pooled with perishable goods"
-        
-        if candidate.is_perishable and has_hazardous:
-            return False, "Perishable goods cannot be pooled with hazardous chemicals"
-
-        return True, "Compatible"
+        ok, reason, _cautions = compatibility_rules.check_candidate(existing_items, candidate)
+        return ok, reason
 
     @staticmethod
     def item_volume(item: ShipmentItem) -> float:

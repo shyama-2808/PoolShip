@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, model_validator
 
 # How a pool's trip cost is shared between shippers
 SplitMethod = Literal["weight", "volume", "distance", "ton_km"]
+# Temperature a shipment must travel at
+TemperatureClass = Literal["ambient", "chilled", "frozen"]
 
 
 class EngineShipment(BaseModel):
@@ -23,6 +25,12 @@ class EngineShipment(BaseModel):
     is_perishable: bool = False
     is_hazardous: bool = False
     is_fragile: bool = False
+    goods_type: Optional[str] = Field(
+        default=None, description="e.g. textiles, perishable, chemicals, grains, construction (see /engine/compatibility/rules)"
+    )
+    temperature_class: TemperatureClass = Field(
+        default="ambient", description="ambient, chilled (2 to 8 °C) or frozen (-18 °C or colder)"
+    )
     origin_lat: Optional[float] = None
     origin_lng: Optional[float] = None
     dest_lat: Optional[float] = None
@@ -66,6 +74,32 @@ class CompatibilityRequest(BaseModel):
 class CompatibilityResponse(BaseModel):
     compatible: bool
     reason: str
+    cautions: List[str] = Field(default=[], description="Allowed, but with a handling note")
+
+
+class PoolCompatibilityRequest(BaseModel):
+    shipments: List[EngineShipment] = Field(min_length=1, description="Shipments you want to pool together")
+
+
+class Conflict(BaseModel):
+    shipment_ids: List[int]
+    severity: Literal["block", "caution"]
+    rule: str
+    reason: str
+
+
+class ShipmentFlags(BaseModel):
+    shipment_id: int
+    flags: List[str] = Field(description="fragile, chilled, frozen, hazardous")
+    handling: List[str]
+
+
+class PoolCompatibilityResponse(BaseModel):
+    compatible: bool = Field(description="False if any two shipments can't share a truck")
+    reason: str
+    conflicts: List[Conflict] = Field(description="Pairs that can't share a truck")
+    cautions: List[Conflict] = Field(description="Pairs that may share, with care")
+    flags: List[ShipmentFlags]
 
 
 # ---- 2. Load optimisation (bin-packing) ---------------------------------------
@@ -352,6 +386,243 @@ class FindPoolsResponse(BaseModel):
     unmatched: List[UnmatchedShipment]
 
 
+# ---- Task 6: multi-stop route (order pickups and drops) -----------------------
+class StopShipment(BaseModel):
+    id: int
+    origin_lat: float
+    origin_lng: float
+    dest_lat: float
+    dest_lng: float
+    origin_address: Optional[str] = None
+    destination_address: Optional[str] = None
+
+
+class OptimizeStopsRequest(BaseModel):
+    shipments: List[StopShipment] = Field(min_length=1, description="The pool's shipments")
+    start: Optional[PathPoint] = Field(default=None, description="Where the truck starts (e.g. its depot). Leave out to start at the best pickup.")
+    end: Optional[PathPoint] = Field(default=None, description="Where the truck must finish. Leave out to finish at the last drop.")
+    use_osrm: bool = Field(
+        default=True,
+        description="Ask the online OSRM map service for road km. If false or offline, uses straight line x 1.25.",
+    )
+
+
+class RouteStop(BaseModel):
+    seq: int = Field(description="1 = first stop")
+    kind: Literal["start", "pickup", "drop", "end"]
+    shipment_id: Optional[int] = None
+    lat: float
+    lng: float
+    place: Optional[str] = None
+    leg_km: float = Field(description="Km from the previous stop")
+    cumulative_km: float
+    leg_minutes: float
+    cumulative_minutes: float
+
+
+class OptimizeStopsResponse(BaseModel):
+    stops: List[RouteStop] = Field(description="Stops in the order to drive them; every pickup comes before its drop")
+    total_km: float
+    total_minutes: float = Field(description="Driving time only (OSRM, or 45 km/h estimate)")
+    as_listed_km: float = Field(description="Km if you drove all pickups as listed, then all drops as listed")
+    km_saved: float
+    saved_percentage: float
+    method: Literal["exact", "heuristic"] = Field(description="exact up to 6 shipments, heuristic above")
+    distance_source: Literal["osrm", "estimate"]
+
+
+# ---- Task 8: loads for the empty trip home -------------------------------------
+class TimedTruck(EngineTruckWithRoute):
+    origin_city: Optional[str] = None
+    destination_city: Optional[str] = None
+    available_date: Optional[datetime] = Field(
+        default=None, description="When the truck leaves on its outbound trip. Leave out to skip the on-time check.")
+
+
+class ReturnTripTruck(TimedTruck):
+    return_dest_lat: Optional[float] = Field(default=None, description="Home base if not the origin")
+    return_dest_lng: Optional[float] = None
+    return_city: Optional[str] = None
+
+
+class ReturnTripRequest(BaseModel):
+    truck: ReturnTripTruck
+    shipments: List[PoolShipment] = Field(description="Open shipments to look through")
+    corridor_tolerance_km: float = Field(default=40.0, gt=0)
+    unloading_hours: float = Field(default=2.0, ge=0, description="Time to unload at the destination before heading home")
+
+
+class ReturnRoute(BaseModel):
+    from_: PathPoint = Field(alias="from")
+    to: PathPoint
+    outbound_km: float
+    return_km: float
+    departs_at: Optional[datetime] = Field(description="Outbound drive (45 km/h) + unloading, after available_date")
+    arrives_home_at: Optional[datetime] = None
+
+
+class ReturnMatch(BaseModel):
+    shipment_id: int
+    weight_kg: float
+    shipment_distance_km: float
+    estimated_drop_at: Optional[datetime] = None
+    from_: Optional[str] = Field(default=None, alias="from")
+    to: Optional[str] = None
+    pays: float = Field(description="₹ share of the return trip (tonnes x km)")
+
+
+class ReturnLoad(BaseModel):
+    total_weight_kg: float
+    total_volume_cbm: float
+    overall_utilization_pct: float
+
+
+class ReturnTripResponse(BaseModel):
+    truck_id: int
+    return_route: ReturnRoute
+    corridor_tolerance_km: float
+    matched: List[ReturnMatch] = Field(description="Shipments the truck can carry home: on the route, on time and fitting")
+    rejected: List[RouteReject]
+    load: ReturnLoad
+    stop_plan: Optional[OptimizeStopsResponse] = None
+    return_trip_earnings: float = Field(description="Return km x rate, now paid by the matched shippers instead of nobody")
+    is_empty_return: bool
+
+
+# ---- Task 9: dynamic pricing -----------------------------------------------------
+Urgency = Literal["standard", "express", "urgent"]
+
+
+class PriceShipment(EngineShipment):
+    distance_km: Optional[float] = Field(default=None, gt=0, description="Leave out to estimate it from the coordinates")
+
+
+class PriceRequest(BaseModel):
+    shipment: PriceShipment
+    truck: EngineTruck
+    truck_fill_pct: float = Field(default=50.0, ge=0, le=100, description="How full the truck already is before this shipment")
+    urgency: Urgency = "standard"
+    hours_until_deadline: Optional[float] = Field(
+        default=None, gt=0, description="If given, urgency is worked out from it instead")
+    open_shipments_on_route: Optional[int] = Field(default=None, ge=0, description="Demand: open shipments on this route")
+    trucks_available_on_route: Optional[int] = Field(default=None, ge=0, description="Supply: trucks on this route")
+
+    @model_validator(mode="after")
+    def _need_distance(self):
+        s = self.shipment
+        if s.distance_km is None and None in (s.origin_lat, s.origin_lng, s.dest_lat, s.dest_lng):
+            raise ValueError("Give shipment.distance_km, or its origin and destination coordinates")
+        return self
+
+
+class PriceFactor(BaseModel):
+    factor: float
+    why: str
+
+
+class UrgencyFactor(PriceFactor):
+    level: Urgency
+
+
+class PriceFactors(BaseModel):
+    demand: PriceFactor
+    urgency: UrgencyFactor
+    fill: PriceFactor
+
+
+class PriceLimits(BaseModel):
+    min_multiplier: float
+    max_multiplier: float
+
+
+class PriceResponse(BaseModel):
+    shipment_km: float
+    space_share_pct: float = Field(description="Share of the truck it uses: higher of weight % and volume %")
+    base_price: float = Field(description="₹ = km x rate x space share")
+    factors: PriceFactors
+    raw_multiplier: float = Field(description="demand x urgency x fill, before the limits")
+    multiplier: float = Field(description="raw_multiplier kept between the limits")
+    capped: Optional[Literal["at maximum", "at minimum"]] = None
+    limits: PriceLimits
+    price: float = Field(description="₹ = base_price x multiplier")
+
+
+class PriceScenario(BaseModel):
+    scenario: str
+    price: float
+    multiplier: float
+    capped: Optional[str] = None
+
+
+class PriceScenariosResponse(BaseModel):
+    shipment_id: int
+    truck_id: int
+    base_price: float
+    scenarios: List[PriceScenario]
+
+
+# ---- Task 10: ETA and delay prediction ---------------------------------------------
+DelayFlag = Literal["on_time", "at_risk", "late", "no_deadline"]
+
+
+class EtaRequest(BaseModel):
+    truck: TimedTruck
+    shipments: List[PoolShipment] = Field(min_length=1, description="The pool's shipments (with delivery windows)")
+    departure_time: Optional[datetime] = Field(
+        default=None, description="When the truck leaves its depot. Leave out to use truck.available_date.")
+    traffic_multiplier: Optional[float] = Field(
+        default=None, gt=0, description="Live traffic number (1.3 = 30% slower than empty roads). "
+                                        "Leave out to use the time-of-day model.")
+    use_osrm: bool = Field(default=False, description="Road times from OSRM instead of the 45 km/h estimate")
+
+    @model_validator(mode="after")
+    def _need_a_start_time(self):
+        if self.departure_time is None and self.truck.available_date is None:
+            raise ValueError("Give departure_time or truck.available_date")
+        return self
+
+
+class ShipmentEta(BaseModel):
+    shipment_id: int
+    eta: datetime = Field(description="When the truck reaches this shipment's drop")
+    deadline: Optional[datetime] = Field(description="End of its delivery window")
+    minutes_to_spare: Optional[int] = Field(description="Negative = minutes late")
+    delay_flag: DelayFlag
+    likely_late: bool = Field(description="True when late or at_risk (under 2 hours to spare)")
+
+
+class TimelineStop(BaseModel):
+    seq: int
+    kind: Literal["start", "pickup", "drop", "end"]
+    shipment_id: Optional[int] = None
+    place: Optional[str] = None
+    arrives_at: datetime
+    leaves_at: datetime
+
+
+class EtaMinutes(BaseModel):
+    free_flow_driving: int
+    traffic_delay: int
+    loading_unloading: int
+    rest_breaks: int
+
+
+class EtaResponse(BaseModel):
+    pool_id: Optional[int] = None
+    truck_id: Optional[int] = None
+    status: Optional[str] = None
+    departure: datetime
+    eta: datetime = Field(description="Arrival at the last stop")
+    delay_flag: DelayFlag = Field(description="Worst flag of the pool's shipments")
+    likely_late: bool
+    late_shipments: List[int] = Field(description="Shipments that are late or at risk")
+    minutes: EtaMinutes
+    total_km: float
+    traffic_model: str
+    shipments: List[ShipmentEta]
+    timeline: List[TimelineStop]
+
+
 # ---- 6. Whole pipeline --------------------------------------------------------
 class PlanPoolRequest(BaseModel):
     truck: EngineTruckWithRoute
@@ -371,3 +642,6 @@ class PlanPoolResponse(BaseModel):
     load: OptimizeLoadResponse
     cost_split: CostSplitResponse
     carbon: CarbonResponse
+    stop_plan: Optional[OptimizeStopsResponse] = Field(
+        default=None, description="Best order to visit the packed shipments' pickups and drops (offline estimate)"
+    )

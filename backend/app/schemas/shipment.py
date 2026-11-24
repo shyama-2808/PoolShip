@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional
 from datetime import datetime
 from app.models.shipment import ShipmentStatus
 
@@ -16,6 +16,9 @@ class ShipmentBase(BaseModel):
     is_perishable: bool = False
     is_hazardous: bool = False
     is_fragile: bool = False
+    temperature_class: Optional[Literal["ambient", "chilled", "frozen"]] = Field(
+        default="ambient", description="ambient, chilled (2 to 8 °C) or frozen (-18 °C or colder)"
+    )
 
     origin_address: str
     origin_lat: float
