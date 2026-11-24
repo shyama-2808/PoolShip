@@ -86,6 +86,7 @@ class RouteMatchingService:
         try:
             import httpx
             from app.core.config import settings
+            coord_str = ";".join([f"{lon},{lat}" for lon, lat in coordinates])
             url = f"{settings.OSRM_BASE_URL}/route/v1/driving/{coord_str}?overview=full&geometries=geojson"
             async with httpx.AsyncClient(timeout=5.0) as client:
                 res = await client.get(url)
