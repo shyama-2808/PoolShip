@@ -244,6 +244,23 @@ export default function Navbar() {
                     )}
                   </button>
                 ))}
+
+                <div className="pt-2 mt-1 border-t border-slate-100 flex items-center justify-between text-xs px-2">
+                  <Link
+                    href="/profile"
+                    onClick={() => setShowUserDropdown(false)}
+                    className="font-bold text-sky-600 hover:text-sky-700 hover:underline flex items-center gap-1"
+                  >
+                    <UserIcon className="w-3.5 h-3.5" /> View Profile &amp; Reviews
+                  </Link>
+                  <Link
+                    href="/login"
+                    onClick={() => setShowUserDropdown(false)}
+                    className="text-[11px] text-slate-500 hover:text-slate-800 font-semibold"
+                  >
+                    Sign In &rarr;
+                  </Link>
+                </div>
               </div>
             )}
           </div>
@@ -346,6 +363,21 @@ export default function Navbar() {
             <Cpu className="w-4 h-4 text-purple-600" />
             <span>{t.smartEngine}</span>
           </Link>
+
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs px-1">
+            <Link
+              href="/profile"
+              className="text-sky-600 hover:underline font-bold flex items-center gap-1.5"
+            >
+              <UserIcon className="w-4 h-4" /> My Profile &amp; Reputation
+            </Link>
+            <Link
+              href="/login"
+              className="text-slate-600 hover:text-slate-900 font-semibold"
+            >
+              Sign In / Register &rarr;
+            </Link>
+          </div>
         </div>
       )}
     </header>

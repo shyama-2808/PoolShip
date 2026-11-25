@@ -16,7 +16,8 @@ import {
   Navigation,
   ArrowRight,
   ShieldCheck,
-  PackageCheck
+  PackageCheck,
+  Star
 } from "lucide-react";
 import { mockStore, Truck as TruckType, Pool, Shipment, User } from "@/lib/mockStore";
 import { translations, Locale } from "@/locales/translations";
@@ -29,6 +30,9 @@ export default function TransporterDashboard() {
   const [lang, setLang] = useState<Locale>("en");
 
   const [showAddTruckModal, setShowAddTruckModal] = useState(false);
+  const [ratingShipment, setRatingShipment] = useState<Shipment | null>(null);
+  const [starCount, setStarCount] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
 
   // Form state for adding new truck
   const [newTruckData, setNewTruckData] = useState({
@@ -92,6 +96,21 @@ export default function TransporterDashboard() {
       is_return_trip: newTruckData.is_return_trip,
     });
     setShowAddTruckModal(false);
+  };
+
+  const handleSubmitShipperRating = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !ratingShipment) return;
+    mockStore.addRating({
+      pool_id: ratingShipment.pool_id || 1,
+      from_user_id: currentUser.id,
+      to_user_id: ratingShipment.shipper_id,
+      rating: starCount,
+      comment: ratingComment || "Punctual handover and packaging compliant with highway cargo standards.",
+    });
+    setRatingShipment(null);
+    setRatingComment("");
+    setStarCount(5);
   };
 
   const handleUpdateStatus = (poolId: number, status: Pool["status"]) => {
@@ -225,7 +244,16 @@ export default function TransporterDashboard() {
                             <span className="font-semibold text-slate-800">{s.title}</span>
                             <span className="text-slate-400 block">{s.weight_kg} kg · OTP: {s.delivery_otp}</span>
                           </div>
-                          <span className="font-bold text-slate-900">₹{s.allocated_cost?.toLocaleString()}</span>
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold text-slate-900">₹{s.allocated_cost?.toLocaleString()}</span>
+                            <button
+                              onClick={() => setRatingShipment(s)}
+                              className="bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 transition"
+                              title="Leave performance review for this shipper"
+                            >
+                              <Star className="w-3 h-3 text-amber-500 fill-amber-500" /> Rate Shipper
+                            </button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -437,6 +465,81 @@ export default function TransporterDashboard() {
                   className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-bold"
                 >
                   Register Truck & Route
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Rate Shipper Modal (Task 7) */}
+      {ratingShipment && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b pb-3">
+              <div className="flex items-center gap-2">
+                <Star className="w-5 h-5 text-amber-500 fill-amber-500" />
+                <h3 className="font-bold text-slate-900">Rate &amp; Review Shipper</h3>
+              </div>
+              <button
+                onClick={() => setRatingShipment(null)}
+                className="text-slate-400 hover:text-slate-600 font-bold"
+              >
+                &times;
+              </button>
+            </div>
+
+            <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs space-y-1">
+              <p className="font-bold text-slate-800">{ratingShipment.title}</p>
+              <p className="text-slate-500">Shipper ID: #{ratingShipment.shipper_id} &bull; {ratingShipment.weight_kg} kg payload</p>
+            </div>
+
+            <form onSubmit={handleSubmitShipperRating} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">
+                  Overall Shipper Rating:
+                </label>
+                <div className="flex items-center gap-2">
+                  {[1, 2, 3, 4, 5].map((star) => (
+                    <button
+                      key={star}
+                      type="button"
+                      onClick={() => setStarCount(star)}
+                      className="p-1 text-amber-400 hover:scale-110 transition"
+                    >
+                      <Star className={`w-6 h-6 ${star <= starCount ? "fill-amber-400 text-amber-400" : "text-slate-300"}`} />
+                    </button>
+                  ))}
+                  <span className="font-bold text-slate-700 ml-2">{starCount} / 5 Stars</span>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-slate-600 font-semibold mb-1">
+                  Feedback on Cargo Packaging &amp; Loading Coordination:
+                </label>
+                <textarea
+                  rows={3}
+                  value={ratingComment}
+                  onChange={(e) => setRatingComment(e.target.value)}
+                  placeholder="e.g. Excellent pallet packaging, exact weight declared, punctual warehouse handover."
+                  className="w-full border rounded-lg p-2.5 text-xs text-slate-800"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t">
+                <button
+                  type="button"
+                  onClick={() => setRatingShipment(null)}
+                  className="px-3 py-1.5 rounded-lg border text-slate-600"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold"
+                >
+                  Submit Shipper Review
                 </button>
               </div>
             </form>

@@ -26,10 +26,11 @@ export default function TrackingPage(_props: any) {
   const [pool, setPool] = useState<Pool | null>(null);
   const [truck, setTruck] = useState<TruckType | null>(null);
 
-  // Proof of Delivery OTP & Signature
+  // Proof of Delivery OTP & Signature & Photo
   const [enteredOtp, setEnteredOtp] = useState("");
   const [podStatusMsg, setPodStatusMsg] = useState("");
   const [podSuccess, setPodSuccess] = useState(false);
+  const [podPhoto, setPodPhoto] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -98,12 +99,34 @@ export default function TrackingPage(_props: any) {
     setHasSignature(false);
   };
 
+  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setPodPhoto(reader.result as string);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSimulatePhoto = () => {
+    // Generates a mock delivery handover placeholder SVG data URI
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="240" viewBox="0 0 400 240"><rect width="400" height="240" fill="#0f172a"/><rect x="20" y="20" width="360" height="200" fill="#1e293b" rx="8" stroke="#334155" stroke-width="2"/><text x="200" y="90" fill="#38bdf8" font-family="sans-serif" font-size="16" font-weight="bold" text-anchor="middle">POOLSHIP CARGO HANDOVER PROOF</text><text x="200" y="125" fill="#94a3b8" font-family="sans-serif" font-size="12" text-anchor="middle">Consignment Pallet Verified at Destination Warehouse</text><text x="200" y="155" fill="#4ade80" font-family="monospace" font-size="13" text-anchor="middle">GPS: 12.9716 N, 77.5946 E &bull; ${new Date().toLocaleDateString()}</text><text x="200" y="185" fill="#e2e8f0" font-family="sans-serif" font-size="11" text-anchor="middle">Cargo Intact &amp; Packaging Undamaged</text></svg>`;
+    const dataUri = `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+    setPodPhoto(dataUri);
+  };
+
   const handleVerifyOtp = (e: React.FormEvent) => {
     e.preventDefault();
     if (!shipment) return;
 
     const signatureData = hasSignature && canvasRef.current ? canvasRef.current.toDataURL() : "Signed digitally by consignee receiver";
-    const res = mockStore.verifyOtpAndDeliver(shipment.id, enteredOtp, signatureData);
+    const res = mockStore.verifyOtpAndDeliver(
+      shipment.id,
+      enteredOtp,
+      signatureData,
+      podPhoto || undefined
+    );
     setPodStatusMsg(res.message);
     if (res.success) {
       setPodSuccess(true);
@@ -290,18 +313,54 @@ export default function TrackingPage(_props: any) {
             )}
 
             {shipment.status === "DELIVERED" ? (
-              <div className="bg-emerald-950/50 border border-emerald-500/40 p-4 rounded-xl space-y-2 text-xs">
-                <div className="flex items-center gap-2 text-emerald-400 font-bold">
-                  <CheckCircle2 className="w-4 h-4" /> Handover Completed & Verified
+              <div className="bg-emerald-950/50 border border-emerald-500/40 p-4 rounded-xl space-y-3 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 text-emerald-400 font-bold">
+                    <CheckCircle2 className="w-4 h-4" /> Handover Completed &amp; Verified
+                  </div>
+                  <span className="text-[10px] bg-emerald-900 text-emerald-200 px-2 py-0.5 rounded font-mono font-bold">
+                    OTP: {shipment.delivery_otp}
+                  </span>
                 </div>
                 <p className="text-slate-300">
-                  Delivered on {new Date().toLocaleDateString("en-IN")}. Consignee signature and OTP archived.
+                  Delivered on {shipment.delivered_at ? new Date(shipment.delivered_at).toLocaleDateString("en-IN") : new Date().toLocaleDateString("en-IN")}. Consignee signature, photo evidence, and OTP archived into audit ledger.
                 </p>
+
+                {/* E-Way Bill Number Badge */}
+                <div className="bg-slate-800/80 px-3 py-2 rounded-lg border border-slate-700 flex items-center justify-between text-[11px] font-mono">
+                  <span className="text-slate-400">E-Way Bill Number:</span>
+                  <span className="font-bold text-sky-400 tracking-wider">EWB-2026{shipment.id.toString().padStart(6, "0")}</span>
+                </div>
+
+                {/* POD Evidence Previews */}
+                <div className="pt-2 border-t border-slate-800 grid grid-cols-2 gap-2">
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-1">Consignee Signature</span>
+                    {shipment.proof_signature && shipment.proof_signature.startsWith("data:") ? (
+                      <img src={shipment.proof_signature} alt="Signature" className="h-12 w-full bg-white rounded border border-slate-700 object-contain p-1" />
+                    ) : (
+                      <div className="h-12 w-full bg-slate-800 text-[10px] text-slate-400 flex items-center justify-center rounded border border-slate-700">
+                        Digital Signature Archived
+                      </div>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-[10px] text-slate-400 block mb-1">Unloading Proof Photo</span>
+                    {shipment.proof_photo ? (
+                      <img src={shipment.proof_photo} alt="Dropoff Photo" className="h-12 w-full bg-slate-800 rounded border border-slate-700 object-cover" />
+                    ) : (
+                      <div className="h-12 w-full bg-slate-800 text-[10px] text-slate-400 flex items-center justify-center rounded border border-slate-700">
+                        Physical Inspection OK
+                      </div>
+                    )}
+                  </div>
+                </div>
+
                 <Link
                   href="/shipper"
-                  className="inline-block mt-2 bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-3 py-1.5 rounded-lg text-xs transition"
+                  className="inline-block mt-1 w-full text-center bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold px-3 py-2 rounded-lg text-xs transition shadow-sm"
                 >
-                  Download GST Invoice in Shipper Portal →
+                  Download GST Invoice in Shipper Portal &rarr;
                 </Link>
               </div>
             ) : (
@@ -324,6 +383,50 @@ export default function TrackingPage(_props: any) {
                   </span>
                 </div>
 
+                {/* Dropoff Photo Evidence Upload (Task 9) */}
+                <div>
+                  <div className="flex items-center justify-between text-slate-300 font-semibold mb-1">
+                    <span className="flex items-center gap-1">
+                      <Camera className="w-3.5 h-3.5 text-emerald-400" /> Unloading / Handover Photo Proof
+                    </span>
+                    {podPhoto && (
+                      <button
+                        type="button"
+                        onClick={() => setPodPhoto(null)}
+                        className="text-[10px] text-red-400 hover:text-red-300"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+
+                  {podPhoto ? (
+                    <div className="relative rounded-lg overflow-hidden border border-slate-700 bg-slate-800 p-1">
+                      <img src={podPhoto} alt="POD Preview" className="w-full h-24 object-cover rounded" />
+                      <div className="text-[10px] text-emerald-400 font-medium text-center mt-1">
+                        &check; Photo Attached &amp; Geo-tagged
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="cursor-pointer flex flex-col items-center justify-center p-2.5 border border-dashed border-slate-700 hover:border-sky-500 rounded-lg bg-slate-800/60 transition text-center">
+                        <Camera className="w-4 h-4 text-slate-400 mb-1" />
+                        <span className="text-[10px] text-slate-300 font-medium">Upload File</span>
+                        <input type="file" accept="image/*" onChange={handlePhotoUpload} className="hidden" />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={handleSimulatePhoto}
+                        className="flex flex-col items-center justify-center p-2.5 border border-slate-700 hover:border-emerald-500 rounded-lg bg-slate-800/60 transition text-center"
+                      >
+                        <CheckCircle2 className="w-4 h-4 text-emerald-400 mb-1" />
+                        <span className="text-[10px] text-slate-300 font-medium">Simulate Photo</span>
+                      </button>
+                    </div>
+                  )}
+                  <span className="text-[10px] text-slate-400 block mt-1">Accepts cargo condition photo or receiver handover snap</span>
+                </div>
+
                 {/* Digital Signature Pad */}
                 <div>
                   <div className="flex items-center justify-between text-slate-300 font-semibold mb-1">
@@ -343,7 +446,7 @@ export default function TrackingPage(_props: any) {
                       ref={canvasRef}
                       width={320}
                       height={100}
-                      className="w-full h-24 touch-none cursor-crosshair bg-white"
+                      className="w-full h-20 touch-none cursor-crosshair bg-white"
                       onMouseDown={startDrawing}
                       onMouseMove={draw}
                       onMouseUp={stopDrawing}
@@ -360,7 +463,7 @@ export default function TrackingPage(_props: any) {
                   type="submit"
                   className="w-full bg-emerald-500 hover:bg-emerald-600 text-slate-950 font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2 shadow-lg"
                 >
-                  <FileCheck2 className="w-4 h-4" /> Verify OTP & Mark Delivered
+                  <FileCheck2 className="w-4 h-4" /> Verify OTP &amp; Mark Delivered
                 </button>
               </form>
             )}
