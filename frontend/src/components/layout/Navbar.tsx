@@ -55,86 +55,103 @@ export default function Navbar() {
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-slate-200">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-2">
+    <header className="sticky top-0 z-50 bg-white/95 backdrop-blur border-b border-slate-200 shadow-xs">
+      <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2 shrink-0">
-          <div className="bg-sky-600 text-white p-1.5 rounded-lg font-bold flex items-center justify-center">
+        <Link href="/" className="flex items-center gap-2.5 shrink-0">
+          <div className="bg-sky-600 text-white p-1.5 rounded-lg font-bold flex items-center justify-center shadow-xs">
             <Truck className="w-5 h-5" />
           </div>
-          <span className="text-xl font-black tracking-tight text-slate-900">
+          <span className="text-xl font-black tracking-tight text-slate-900 whitespace-nowrap">
             Pool<span className="text-sky-600">Ship</span>
           </span>
-          <span className="hidden sm:inline-flex text-[11px] bg-emerald-100 text-emerald-800 font-semibold px-2 py-0.5 rounded-full items-center gap-1">
-            <Leaf className="w-3 h-3 text-emerald-600" /> {t.greenPtl}
+          <span className="hidden sm:inline-flex text-[11px] bg-emerald-50 text-emerald-700 border border-emerald-200/80 font-semibold px-2 py-0.5 rounded-full items-center gap-1 whitespace-nowrap">
+            <Leaf className="w-3 h-3 text-emerald-600 shrink-0" /> {t.greenPtl}
           </span>
         </Link>
 
         {/* Primary Navigation Links */}
-        <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600">
+        <nav className="hidden lg:flex items-center gap-1 xl:gap-2 text-[13px] xl:text-sm font-medium text-slate-600 shrink-0">
           <Link
             href="/shipper"
-            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/shipper") ? "text-sky-600 font-bold border-b-2 border-sky-600" : "hover:text-sky-600"
-              }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname.startsWith("/shipper")
+                ? "text-sky-700 bg-sky-50 font-semibold shadow-2xs"
+                : "hover:text-sky-600 hover:bg-slate-100/80"
+            }`}
           >
-            <UserCheck className="w-4 h-4 text-sky-500" />
-            {t.shipperPortal}
+            <UserCheck className="w-4 h-4 text-sky-500 shrink-0" />
+            <span>{t.shipperPortal}</span>
           </Link>
 
           <Link
             href="/transporter"
-            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/transporter") ? "text-indigo-600 font-bold border-b-2 border-indigo-600" : "hover:text-indigo-600"
-              }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname.startsWith("/transporter")
+                ? "text-indigo-700 bg-indigo-50 font-semibold shadow-2xs"
+                : "hover:text-indigo-600 hover:bg-slate-100/80"
+            }`}
           >
-            <Truck className="w-4 h-4 text-indigo-500" />
-            {t.transporterHub}
+            <Truck className="w-4 h-4 text-indigo-500 shrink-0" />
+            <span>{t.transporterHub}</span>
           </Link>
 
           <Link
             href="/admin"
-            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/admin") ? "text-emerald-600 font-bold border-b-2 border-emerald-600" : "hover:text-emerald-600"
-              }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname.startsWith("/admin")
+                ? "text-emerald-700 bg-emerald-50 font-semibold shadow-2xs"
+                : "hover:text-emerald-600 hover:bg-slate-100/80"
+            }`}
           >
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            {t.adminConsole}
+            <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{t.adminConsole}</span>
           </Link>
 
           <Link
             href="/tracking/101"
-            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/tracking") ? "text-amber-600 font-bold border-b-2 border-amber-600" : "hover:text-amber-600"
-              }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname.startsWith("/tracking")
+                ? "text-amber-700 bg-amber-50 font-semibold shadow-2xs"
+                : "hover:text-amber-600 hover:bg-slate-100/80"
+            }`}
           >
-            <Activity className="w-4 h-4 text-amber-500" />
-            {t.liveTracking}
+            <Activity className="w-4 h-4 text-amber-500 shrink-0" />
+            <span>{t.liveTracking}</span>
           </Link>
 
           <Link
             href="/carbon-savings"
-            className={`flex items-center gap-1.5 py-1 transition ${pathname === "/carbon-savings" ? "text-teal-600 font-bold border-b-2 border-teal-600" : "hover:text-teal-600"
-              }`}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname === "/carbon-savings"
+                ? "text-teal-700 bg-teal-50 font-semibold shadow-2xs"
+                : "hover:text-teal-600 hover:bg-slate-100/80"
+            }`}
           >
-            <Leaf className="w-4 h-4 text-teal-600" />
-            {t.carbonDashboard}
+            <Leaf className="w-4 h-4 text-teal-600 shrink-0" />
+            <span>{t.carbonDashboard}</span>
           </Link>
 
           <Link
             href="/engine"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname === "/engine" ? "text-purple-600 font-bold border-b-2 border-purple-600" : "hover:text-purple-600"
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg whitespace-nowrap transition shrink-0 ${
+              pathname === "/engine"
+                ? "text-purple-700 bg-purple-50 font-semibold shadow-2xs"
+                : "hover:text-purple-600 hover:bg-slate-100/80"
             }`}
           >
-            <Cpu className="w-4 h-4 text-purple-600" />
-            {t.smartEngine}
+            <Cpu className="w-4 h-4 text-purple-600 shrink-0" />
+            <span>{t.smartEngine}</span>
           </Link>
         </nav>
 
         {/* Right Tools: Language, Persona Switcher, Notifications, Reset */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2.5 shrink-0">
           {/* Language Switcher */}
           <div className="relative">
             <button
               onClick={() => handleSwitchLang(lang === "en" ? "hi" : lang === "hi" ? "kn" : "en")}
-              className="flex items-center gap-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition"
+              className="flex items-center gap-1 text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition whitespace-nowrap shrink-0"
               title="Switch language: English / Hindi / Kannada"
             >
               <Globe className="w-3.5 h-3.5 text-slate-500" />
@@ -146,7 +163,7 @@ export default function Navbar() {
           <div className="relative">
             <button
               onClick={() => setShowNotifDropdown(!showNotifDropdown)}
-              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 relative transition"
+              className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 relative transition shrink-0"
               title={t.notifications}
             >
               <Bell className="w-4 h-4" />
@@ -185,11 +202,11 @@ export default function Navbar() {
           <div className="relative">
             <button
               onClick={() => setShowUserDropdown(!showUserDropdown)}
-              className="flex items-center gap-1.5 text-xs font-semibold bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 px-3 py-1.5 rounded-lg transition"
+              className="flex items-center gap-1.5 text-xs font-semibold bg-sky-50 hover:bg-sky-100 text-sky-800 border border-sky-200 px-3 py-1.5 rounded-lg transition whitespace-nowrap shrink-0"
             >
-              <UserIcon className="w-3.5 h-3.5 text-sky-600" />
-              <span className="max-w-[120px] truncate">{currentUser?.full_name.split(" ")[0]} ({currentUser?.role})</span>
-              <ChevronDown className="w-3 h-3 text-sky-500" />
+              <UserIcon className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+              <span className="max-w-[140px] truncate">{currentUser?.full_name.split(" ")[0]} ({currentUser?.role})</span>
+              <ChevronDown className="w-3 h-3 text-sky-500 shrink-0" />
             </button>
 
             {showUserDropdown && (

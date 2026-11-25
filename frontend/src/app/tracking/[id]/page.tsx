@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
+import { useParams } from "next/navigation";
 import { 
   CheckCircle2, 
   Clock, 
@@ -19,7 +20,8 @@ import {
 } from "lucide-react";
 import { mockStore, Shipment, Pool, Truck as TruckType } from "@/lib/mockStore";
 
-export default function TrackingPage({ params }: { params: { id: string } }) {
+export default function TrackingPage(_props: any) {
+  const routeParams = useParams();
   const [shipment, setShipment] = useState<Shipment | null>(null);
   const [pool, setPool] = useState<Pool | null>(null);
   const [truck, setTruck] = useState<TruckType | null>(null);
@@ -34,7 +36,8 @@ export default function TrackingPage({ params }: { params: { id: string } }) {
 
   useEffect(() => {
     const update = () => {
-      const sId = Number(params.id) || 101;
+      const paramId = routeParams?.id;
+      const sId = Number(paramId) || 101;
       const s = mockStore.getShipmentById(sId) || mockStore.getShipments()[0];
       setShipment(s);
       if (s?.pool_id) {
@@ -49,7 +52,7 @@ export default function TrackingPage({ params }: { params: { id: string } }) {
     update();
     const unsub = mockStore.subscribe(update);
     return () => unsub();
-  }, [params.id]);
+  }, [routeParams?.id]);
 
   // Canvas signature helpers
   const startDrawing = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
