@@ -14,10 +14,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en">
-      <body className="min-h-screen flex flex-col bg-slate-50 text-slate-900 antialiased">
+    <html lang="en" className="max-w-full overflow-x-hidden">
+      <body className="min-h-screen flex flex-col bg-slate-50 text-slate-900 antialiased max-w-full overflow-x-hidden">
         <Navbar />
-        <main className="flex-1">{children}</main>
+        <main className="flex-1 w-full max-w-full overflow-x-clip">{children}</main>
         <footer className="border-t border-slate-200 bg-white py-6 text-center text-xs text-slate-500">
           <p>© 2026 PoolShip Technologies. Built for Indian MSMEs & Green Logistics.</p>
         </footer>
