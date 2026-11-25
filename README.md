@@ -90,6 +90,34 @@ Visit [http://localhost:3000](http://localhost:3000).
 
 ---
 
+## 🧮 Logistics Engine API & Sample Data
+
+Every engine function can be called directly under `/api/v1/engine` (no database needed). Open Swagger at [http://localhost:8000/api/v1/docs](http://localhost:8000/api/v1/docs), section **Logistics Engine**: each endpoint has a ready-made example built from the sample data.
+
+| Endpoint | What it does |
+|---|---|
+| `GET /engine/sample-data` | The shared sample data (20 shipments, 5 trucks, 5 users) |
+| `POST /engine/compatibility` | Can a shipment share a truck with others (perishable vs hazardous) |
+| `POST /engine/optimize-load` | Pack shipments into a truck by weight, volume, size and compatibility |
+| `POST /engine/cost-split` | Split a trip's cost (`ton_km`, `weight` or `volume`) |
+| `POST /engine/carbon` | CO₂ and diesel saved by pooling |
+| `POST /engine/route/distance` | Straight-line and estimated road distance |
+| `POST /engine/route/corridor-check` | Is a pickup and drop along a truck's route |
+| `POST /engine/route/road-route` | Road distance and time via OSRM (offline estimate if unreachable) |
+| `POST /engine/route/match` | Which shipments lie along a truck's route |
+| `POST /engine/plan-pool` | Whole pipeline: match, pack, split cost, count CO₂ |
+| `GET /engine/demo/{truck_id}` | One-click `plan-pool` for sample truck 1 to 5 |
+
+Sample data lives in `backend/data/sample_data.json` (units: kg, m³, cm, km, ₹). With the backend running:
+
+```bash
+cd backend
+python scripts/load_sample_data.py   # put the sample users, trucks and shipments in the database (safe to re-run)
+python scripts/try_engine.py         # call every engine endpoint and print the results
+```
+
+---
+
 ## 📋 Build Phases & Roadmap (from Feature Specification)
 
 - [x] **Project Scaffolding & Initial Architecture**

@@ -22,6 +22,9 @@ class Pool(Base):
     
     status = Column(SQLEnum(PoolStatus), default=PoolStatus.OPEN, nullable=False)
     
+    # How the trip cost is shared: "weight", "volume", "distance" or "ton_km"
+    split_method = Column(String, default="ton_km", nullable=True)
+
     # Aggregated metrics
     total_distance_km = Column(Float, default=0.0)
     total_cost = Column(Float, default=0.0)
@@ -36,7 +39,7 @@ class Pool(Base):
     # Route polyline encoded or geojson
     route_geometry = Column(String, nullable=True)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     truck = relationship("Truck", back_populates="pools")
     shipments = relationship("Shipment", back_populates="pool")

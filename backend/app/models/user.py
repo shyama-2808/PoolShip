@@ -26,5 +26,4 @@ class User(Base):
     is_verified = Column(Boolean, default=False)
     rating = Column(Integer, default=5)
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))

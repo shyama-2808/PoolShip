@@ -29,6 +29,7 @@ async def create_shipment(
         is_perishable=shipment_in.is_perishable,
         is_hazardous=shipment_in.is_hazardous,
         is_fragile=shipment_in.is_fragile,
+        temperature_class=shipment_in.temperature_class or "ambient",
         origin_address=shipment_in.origin_address,
         origin_lat=shipment_in.origin_lat,
         origin_lng=shipment_in.origin_lng,

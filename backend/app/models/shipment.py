@@ -20,6 +20,8 @@ class Shipment(Base):
     id = Column(Integer, primary_key=True, index=True)
     shipper_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     pool_id = Column(Integer, ForeignKey("pools.id"), nullable=True)
+    # Set when this shipment is one repeat of a recurring shipment (Task 11)
+    recurring_id = Column(Integer, ForeignKey("recurring_shipments.id"), nullable=True)
 
     title = Column(String, nullable=False)
     goods_type = Column(String, nullable=False)  # e.g., "textiles", "hardware", "perishable"
@@ -35,6 +37,8 @@ class Shipment(Base):
     is_perishable = Column(Boolean, default=False)
     is_hazardous = Column(Boolean, default=False)
     is_fragile = Column(Boolean, default=False)
+    # "ambient", "chilled" (2 to 8 °C) or "frozen" (-18 °C); chilled and frozen can't share a truck
+    temperature_class = Column(String, default="ambient", nullable=True)
 
     # Locations
     origin_address = Column(String, nullable=False)
@@ -46,14 +50,14 @@ class Shipment(Base):
     dest_lng = Column(Float, nullable=False)
 
     # Timing
-    delivery_window_start = Column(DateTime, nullable=True)
-    delivery_window_end = Column(DateTime, nullable=True)
+    delivery_window_start = Column(DateTime(timezone=True), nullable=True)
+    delivery_window_end = Column(DateTime(timezone=True), nullable=True)
 
     status = Column(SQLEnum(ShipmentStatus), default=ShipmentStatus.POSTED, nullable=False)
     allocated_cost = Column(Float, nullable=True)  # Allocated share from pool
     
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     shipper = relationship("User", backref="shipments")
     pool = relationship("Pool", back_populates="shipments")
-
+    recurring = relationship("RecurringShipment", back_populates="shipments")
