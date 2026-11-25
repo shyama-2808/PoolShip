@@ -3,13 +3,13 @@
 import { useEffect, useState, useRef } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { 
-  CheckCircle2, 
-  Clock, 
-  MapPin, 
-  Truck, 
-  ShieldCheck, 
-  Navigation, 
+import {
+  CheckCircle2,
+  Clock,
+  MapPin,
+  Truck,
+  ShieldCheck,
+  Navigation,
   ArrowLeft,
   FileCheck2,
   Camera,
@@ -149,11 +149,10 @@ export default function TrackingPage(_props: any) {
         <div className="flex items-center gap-4">
           <div className="text-right">
             <span className="text-xs text-slate-400 block">Current Status</span>
-            <span className={`text-sm font-black px-3 py-1 rounded-full inline-block mt-0.5 ${
-              shipment.status === "DELIVERED" ? "bg-emerald-100 text-emerald-800" :
+            <span className={`text-sm font-black px-3 py-1 rounded-full inline-block mt-0.5 ${shipment.status === "DELIVERED" ? "bg-emerald-100 text-emerald-800" :
               shipment.status === "IN_TRANSIT" ? "bg-amber-100 text-amber-800 animate-pulse" :
-              shipment.status === "POOLED" ? "bg-sky-100 text-sky-800" : "bg-purple-100 text-purple-800"
-            }`}>
+                shipment.status === "POOLED" ? "bg-sky-100 text-sky-800" : "bg-purple-100 text-purple-800"
+              }`}>
               {shipment.status === "IN_TRANSIT" ? "🚛 In Transit (Highway)" : shipment.status}
             </span>
           </div>
@@ -189,9 +188,8 @@ export default function TrackingPage(_props: any) {
                 const isReached = wp.completed;
                 return (
                   <div key={idx} className="flex flex-col items-center group relative cursor-pointer">
-                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${
-                      isReached ? "bg-emerald-500 border-white text-white shadow-lg shadow-emerald-500/50" : "bg-slate-800 border-slate-600 text-slate-400"
-                    }`}>
+                    <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition ${isReached ? "bg-emerald-500 border-white text-white shadow-lg shadow-emerald-500/50" : "bg-slate-800 border-slate-600 text-slate-400"
+                      }`}>
                       {isReached ? <CheckCircle2 className="w-3.5 h-3.5" /> : <span className="text-[10px]">{idx + 1}</span>}
                     </div>
                     <span className="text-[11px] font-semibold text-slate-300 mt-2 max-w-[100px] text-center truncate">
@@ -224,9 +222,8 @@ export default function TrackingPage(_props: any) {
           <div className="relative pl-6 space-y-6 before:absolute before:left-2.5 before:top-2 before:bottom-2 before:w-0.5 before:bg-slate-200">
             {waypoints.map((wp, idx) => (
               <div key={idx} className="relative space-y-1 text-xs">
-                <div className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-white ${
-                  wp.completed ? "border-emerald-500 text-emerald-600" : "border-slate-300 text-slate-300"
-                }`}>
+                <div className={`absolute -left-6 top-0.5 w-5 h-5 rounded-full border-2 flex items-center justify-center bg-white ${wp.completed ? "border-emerald-500 text-emerald-600" : "border-slate-300 text-slate-300"
+                  }`}>
                   {wp.completed && <div className="w-2.5 h-2.5 bg-emerald-500 rounded-full" />}
                 </div>
 
@@ -234,15 +231,14 @@ export default function TrackingPage(_props: any) {
                   <h3 className={`font-bold ${wp.completed ? "text-slate-900" : "text-slate-400"}`}>
                     {wp.name}
                   </h3>
-                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${
-                    wp.completed ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"
-                  }`}>
+                  <span className={`text-[10px] font-bold px-2 py-0.5 rounded ${wp.completed ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-400"
+                    }`}>
                     {wp.completed ? "Checked In" : "Pending"}
                   </span>
                 </div>
                 <p className="text-slate-500">
                   {wp.type === "PICKUP" ? "Consignment pallet loaded into shared cargo hold." :
-                   wp.type === "DROP" ? "Final destination warehouse delivery point." : "Highway corridor toll plaza check."}
+                    wp.type === "DROP" ? "Final destination warehouse delivery point." : "Highway corridor toll plaza check."}
                 </p>
               </div>
             ))}
@@ -286,9 +282,8 @@ export default function TrackingPage(_props: any) {
             </p>
 
             {podStatusMsg && (
-              <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${
-                podSuccess ? "bg-emerald-950/80 border border-emerald-500 text-emerald-300" : "bg-red-950/80 border border-red-500 text-red-300"
-              }`}>
+              <div className={`p-3 rounded-xl text-xs flex items-center gap-2 ${podSuccess ? "bg-emerald-950/80 border border-emerald-500 text-emerald-300" : "bg-red-950/80 border border-red-500 text-red-300"
+                }`}>
                 {podSuccess ? <CheckCircle2 className="w-4 h-4 shrink-0" /> : <AlertCircle className="w-4 h-4 shrink-0" />}
                 <span>{podStatusMsg}</span>
               </div>
