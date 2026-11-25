@@ -3,19 +3,20 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { 
-  Truck, 
-  ShieldCheck, 
-  UserCheck, 
-  Activity, 
-  Leaf, 
-  Bell, 
-  Globe, 
+import {
+  Truck,
+  ShieldCheck,
+  UserCheck,
+  Activity,
+  Leaf,
+  Bell,
+  Globe,
   RotateCcw,
   CheckCircle2,
   ChevronDown,
   User as UserIcon,
-  MessageSquare
+  MessageSquare,
+  Cpu
 } from "lucide-react";
 import { mockStore, User, NotificationItem } from "@/lib/mockStore";
 import { translations, Locale } from "@/locales/translations";
@@ -73,9 +74,8 @@ export default function Navbar() {
         <nav className="hidden lg:flex items-center gap-5 text-sm font-medium text-slate-600">
           <Link
             href="/shipper"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname.startsWith("/shipper") ? "text-sky-600 font-bold border-b-2 border-sky-600" : "hover:text-sky-600"
-            }`}
+            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/shipper") ? "text-sky-600 font-bold border-b-2 border-sky-600" : "hover:text-sky-600"
+              }`}
           >
             <UserCheck className="w-4 h-4 text-sky-500" />
             {t.shipperPortal}
@@ -83,9 +83,8 @@ export default function Navbar() {
 
           <Link
             href="/transporter"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname.startsWith("/transporter") ? "text-indigo-600 font-bold border-b-2 border-indigo-600" : "hover:text-indigo-600"
-            }`}
+            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/transporter") ? "text-indigo-600 font-bold border-b-2 border-indigo-600" : "hover:text-indigo-600"
+              }`}
           >
             <Truck className="w-4 h-4 text-indigo-500" />
             {t.transporterHub}
@@ -93,9 +92,8 @@ export default function Navbar() {
 
           <Link
             href="/admin"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname.startsWith("/admin") ? "text-emerald-600 font-bold border-b-2 border-emerald-600" : "hover:text-emerald-600"
-            }`}
+            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/admin") ? "text-emerald-600 font-bold border-b-2 border-emerald-600" : "hover:text-emerald-600"
+              }`}
           >
             <ShieldCheck className="w-4 h-4 text-emerald-600" />
             {t.adminConsole}
@@ -103,9 +101,8 @@ export default function Navbar() {
 
           <Link
             href="/tracking/101"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname.startsWith("/tracking") ? "text-amber-600 font-bold border-b-2 border-amber-600" : "hover:text-amber-600"
-            }`}
+            className={`flex items-center gap-1.5 py-1 transition ${pathname.startsWith("/tracking") ? "text-amber-600 font-bold border-b-2 border-amber-600" : "hover:text-amber-600"
+              }`}
           >
             <Activity className="w-4 h-4 text-amber-500" />
             {t.liveTracking}
@@ -113,12 +110,21 @@ export default function Navbar() {
 
           <Link
             href="/carbon-savings"
-            className={`flex items-center gap-1.5 py-1 transition ${
-              pathname === "/carbon-savings" ? "text-teal-600 font-bold border-b-2 border-teal-600" : "hover:text-teal-600"
-            }`}
+            className={`flex items-center gap-1.5 py-1 transition ${pathname === "/carbon-savings" ? "text-teal-600 font-bold border-b-2 border-teal-600" : "hover:text-teal-600"
+              }`}
           >
             <Leaf className="w-4 h-4 text-teal-600" />
             {t.carbonDashboard}
+          </Link>
+
+          <Link
+            href="/engine"
+            className={`flex items-center gap-1.5 py-1 transition ${
+              pathname === "/engine" ? "text-purple-600 font-bold border-b-2 border-purple-600" : "hover:text-purple-600"
+            }`}
+          >
+            <Cpu className="w-4 h-4 text-purple-600" />
+            {t.smartEngine}
           </Link>
         </nav>
 
@@ -195,9 +201,8 @@ export default function Navbar() {
                   <button
                     key={u.id}
                     onClick={() => handleSwitchUser(u.id)}
-                    className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition ${
-                      currentUser?.id === u.id ? "bg-sky-50 text-sky-800 font-bold" : "hover:bg-slate-50 text-slate-700"
-                    }`}
+                    className={`w-full text-left px-2.5 py-2 rounded-lg text-xs flex items-center justify-between transition ${currentUser?.id === u.id ? "bg-sky-50 text-sky-800 font-bold" : "hover:bg-slate-50 text-slate-700"
+                      }`}
                   >
                     <div>
                       <p className="font-medium">{u.full_name}</p>
